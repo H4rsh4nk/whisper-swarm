@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed STT Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #334155;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #1e293b;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+
+        .card h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            margin-bottom: 15px;
+        }
+
+        .stat {
+            font-size: 36px;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #64748b;
+            margin-top: 5px;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .upload-zone {
+            border: 2px dashed #475569;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-zone:hover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .upload-zone.dragover {
+            border-color: #22c55e;
+            background: rgba(34, 197, 94, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .workers-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .worker-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #334155;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .worker-badge .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+
+        .books-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .book-item {
+            background: #334155;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .book-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .book-name {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+
+        .book-progress {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        .activity-log {
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid #334155;
+        }
+
+        .log-time {
+            color: #64748b;
+            margin-right: 10px;
+        }
+
+        .log-type {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-right: 8px;
+        }
+
+        .log-type.task { background: #3b82f6; }
+        .log-type.worker { background: #22c55e; }
+        .log-type.book { background: #f59e0b; }
+        .log-type.error { background: #ef4444; }
+
+        .download-btn {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .download-btn:hover {
+            background: #2563eb;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .empty-state {
+            color: #64748b;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Distributed STT Dashboard</h1>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span id="connectionStatus">Connecting...</span>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Overall Progress</h2>
+                <div class="stat" id="overallPercent">0%</div>
+                <div class="stat-label"><span id="completedTasks">0</span> / <span id="totalTasks">0</span> chunks completed</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Active Workers</h2>
+                <div class="stat" id="workerCount">0</div>
+                <div class="stat-label">connected workers</div>
+                <div class="workers-list" id="workersList" style="margin-top: 15px;">
+                    <span class="empty-state">No workers connected</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Upload Audiobook</h2>
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">📁</div>
+                    <div>Drop audio file here or click to upload</div>
+                    <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
+                        Supports: MP3, WAV, M4A, FLAC, OGG
+                    </div>
+                    <input type="file" id="fileInput" accept="audio/*">
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card" style="grid-column: span 2;">
+                <h2>Audiobooks</h2>
+                <div class="books-list" id="booksList">
+                    <span class="empty-state">No audiobooks uploaded yet</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Activity Log</h2>
+                <div class="activity-log" id="activityLog">
+                    <span class="empty-state">Waiting for activity...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let state = {
+            workers: [],
+            books: [],
+            status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 }
+        };
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/dashboard`);
+
+            ws.onopen = () => {
+                document.getElementById('connectionStatus').textContent = 'Connected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                setTimeout(connect, 3000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+        }
+
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'init':
+                    state.status = data.status;
+                    state.books = data.books;
+                    state.workers = data.workers;
+                    updateUI();
+                    break;
+
+                case 'book_added':
+                    addLog('book', `New book: ${data.filename} (${data.total_chunks} chunks)`);
+                    refreshBooks();
+                    break;
+
+                case 'task_assigned':
+                    addLog('task', `Chunk ${data.chunk_id} assigned to ${data.worker_id}`);
+                    break;
+
+                case 'task_completed':
+                    state.status.completed++;
+                    state.status.in_progress--;
+                    state.status.percent = Math.round(state.status.completed / state.status.total * 100);
+                    addLog('task', `Chunk ${data.chunk_id} completed by ${data.worker_id} (${data.processing_time.toFixed(1)}s)`);
+                    updateProgress();
+                    refreshBooks();
+                    break;
+
+                case 'book_completed':
+                    addLog('book', `Book ${data.book_id} fully transcribed!`);
+                    refreshBooks();
+                    break;
+
+                case 'worker_connected':
+                case 'worker_joined':
+                    addLog('worker', `Worker ${data.worker_id || data.hostname} connected`);
+                    refreshWorkers();
+                    break;
+
+                case 'worker_disconnected':
+                    addLog('worker', `Worker ${data.worker_id} disconnected`);
+                    refreshWorkers();
+                    break;
+
+                case 'chunk_progress':
+                    // Real-time progress update (optional handling)
+                    break;
+            }
+        }
+
+        function updateUI() {
+            updateProgress();
+            updateWorkers();
+            updateBooks();
+        }
+
+        function updateProgress() {
+            document.getElementById('overallPercent').textContent = state.status.percent + '%';
+            document.getElementById('completedTasks').textContent = state.status.completed;
+            document.getElementById('totalTasks').textContent = state.status.total;
+            document.getElementById('progressFill').style.width = state.status.percent + '%';
+        }
+
+        function updateWorkers() {
+            const container = document.getElementById('workersList');
+            if (state.workers.length === 0) {
+                container.innerHTML = '<span class="empty-state">No workers connected</span>';
+            } else {
+                container.innerHTML = state.workers.map(w => `
+                    <div class="worker-badge">
+                        <div class="dot"></div>
+                        <span>${w.hostname || w.worker_id}</span>
+                    </div>
+                `).join('');
+            }
+            document.getElementById('workerCount').textContent = state.workers.length;
+        }
+
+        function updateBooks() {
+            const container = document.getElementById('booksList');
+            if (state.books.length === 0) {
+                container.innerHTML = '<span class="empty-state">No audiobooks uploaded yet</span>';
+            } else {
+                container.innerHTML = state.books.map(book => {
+                    const percent = Math.round(book.completed_chunks / book.total_chunks * 100);
+                    const isComplete = book.completed_chunks === book.total_chunks;
+                    return `
+                        <div class="book-item">
+                            <div class="book-header">
+                                <span class="book-name">${book.original_filename || book.book_id}</span>
+                                <span class="book-progress">${book.completed_chunks}/${book.total_chunks} chunks (${percent}%)</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${percent}%"></div>
+                            </div>
+                            ${isComplete ? `<a href="/results/${book.book_id}" class="download-btn">Download Transcript</a>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        function addLog(type, message) {
+            const container = document.getElementById('activityLog');
+            const time = new Date().toLocaleTimeString();
+
+            // Remove empty state if present
+            const emptyState = container.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-type ${type}">${type}</span>
+                <span>${message}</span>
+            `;
+            container.insertBefore(entry, container.firstChild);
+
+            // Keep only last 100 entries
+            while (container.children.length > 100) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        async function refreshBooks() {
+            const resp = await fetch('/status');
+            const data = await resp.json();
+            state.books = data.books;
+            state.status = data.tasks;
+            updateProgress();
+            updateBooks();
+        }
+
+        async function refreshWorkers() {
+            const resp = await fetch('/status');
+            const data = await resp.json();
+            state.workers = data.workers || [];
+            updateWorkers();
+        }
+
+        // File upload handling
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) uploadFile(file);
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+        });
+
+        async function uploadFile(file) {
+            addLog('book', `Uploading ${file.name}...`);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const resp = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+                addLog('book', `Upload complete: ${data.chunks_created} chunks created`);
+                refreshBooks();
+            } catch (err) {
+                addLog('error', `Upload failed: ${err.message}`);
+            }
+        }
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>
