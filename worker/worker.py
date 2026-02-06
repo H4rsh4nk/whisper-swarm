@@ -246,7 +246,9 @@ def main():
     if not master_url.startswith("http"):
         master_url = f"http://{master_url}"
 
-    if not ":" in master_url.split("//")[1]:
+    # Only add :8000 for http:// URLs without a port (not for https/ngrok URLs)
+    host_part = master_url.split("//")[1]
+    if master_url.startswith("http://") and ":" not in host_part.split("/")[0]:
         master_url = f"{master_url}:8000"
 
     worker = STTWorker(master_url)
