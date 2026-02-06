@@ -82,7 +82,7 @@ async def broadcast_progress(data: dict):
 async def dashboard():
     """Serve the dashboard."""
     dashboard_path = Path(__file__).parent / "dashboard.html"
-    return dashboard_path.read_text()
+    return dashboard_path.read_text(encoding="utf-8")
 
 
 @app.post("/upload")
