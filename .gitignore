@@ -1,0 +1,36 @@
+## Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.so
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+venv_worker/
+/venv_worker/
+/venv_worker/**
+
+## Environment files
+.env
+.env.*
+
+## Editor/OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+## Logs
+*.log
+
+## App runtime data
+uploads/
+chunks/
+results/
