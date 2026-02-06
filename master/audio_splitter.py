@@ -10,13 +10,13 @@ from pathlib import Path
 
 
 class AudioSplitter:
-    def __init__(self, output_dir: Path, chunk_duration: int = 300):
+    def __init__(self, output_dir: Path, chunk_duration: int = 1200):
         """
         Initialize the audio splitter.
 
         Args:
             output_dir: Directory to store audio chunks
-            chunk_duration: Duration of each chunk in seconds (default 5 minutes)
+            chunk_duration: Duration of each chunk in seconds (default 20 minutes)
         """
         self.output_dir = Path(output_dir)
         self.chunk_duration = chunk_duration
