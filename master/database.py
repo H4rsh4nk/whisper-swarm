@@ -50,6 +50,15 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_book ON tasks(book_id);
+
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_logs_created ON activity_logs(created_at);
         """)
         conn.commit()
         conn.close()
@@ -206,5 +215,32 @@ class Database:
         rows = conn.execute("""
             SELECT * FROM workers WHERE last_heartbeat > ?
         """, (threshold,)).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def add_log(self, log_type: str, message: str):
+        """Add an activity log entry."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO activity_logs (log_type, message) VALUES (?, ?)
+        """, (log_type, message))
+        conn.commit()
+        
+        # Keep only last 500 logs to prevent database bloat
+        conn.execute("""
+            DELETE FROM activity_logs WHERE id NOT IN (
+                SELECT id FROM activity_logs ORDER BY created_at DESC LIMIT 500
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def get_recent_logs(self, limit: int = 100) -> list[dict]:
+        """Get recent activity logs."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT log_type, message, created_at FROM activity_logs
+            ORDER BY created_at DESC LIMIT ?
+        """, (limit,)).fetchall()
         conn.close()
         return [dict(row) for row in rows]

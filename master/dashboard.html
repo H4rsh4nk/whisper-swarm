@@ -468,6 +468,10 @@
                     state.books = data.books;
                     state.workers = data.workers;
                     updateUI();
+                    // Load persisted logs
+                    if (data.logs && data.logs.length > 0) {
+                        loadPersistedLogs(data.logs);
+                    }
                     break;
 
                 case 'book_added':
@@ -560,6 +564,31 @@
                     `;
                 }).join('');
             }
+        }
+
+        function loadPersistedLogs(logs) {
+            const container = document.getElementById('activityLog');
+            
+            // Clear empty state
+            const emptyState = container.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+            
+            // Clear existing logs
+            container.innerHTML = '';
+            
+            // Logs come in descending order (newest first), display them
+            logs.forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                // Format the timestamp from the database
+                const time = new Date(log.created_at).toLocaleTimeString();
+                entry.innerHTML = `
+                    <span class="log-time">${time}</span>
+                    <span class="log-type ${log.log_type}">${log.log_type}</span>
+                    <span>${log.message}</span>
+                `;
+                container.appendChild(entry);
+            });
         }
 
         function addLog(type, message) {

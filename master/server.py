@@ -106,8 +106,41 @@ class WorkerRegister(BaseModel):
 
 # ----- WebSocket Management -----
 
+def save_activity_log(data: dict):
+    """Save activity log to database based on event type."""
+    event_type = data.get("type")
+    log_type = None
+    message = None
+
+    if event_type == "book_added":
+        log_type = "book"
+        message = f"New book: {data.get('filename')} ({data.get('total_chunks')} chunks)"
+    elif event_type == "task_assigned":
+        log_type = "task"
+        message = f"Chunk {data.get('chunk_id')} assigned to {data.get('worker_id')}"
+    elif event_type == "task_completed":
+        log_type = "task"
+        pt = data.get('processing_time', 0)
+        message = f"Chunk {data.get('chunk_id')} completed by {data.get('worker_id')} ({pt:.1f}s)"
+    elif event_type == "book_completed":
+        log_type = "book"
+        message = f"Book {data.get('book_id')} fully transcribed!"
+    elif event_type == "worker_connected" or event_type == "worker_joined":
+        log_type = "worker"
+        message = f"Worker {data.get('worker_id') or data.get('hostname')} connected"
+    elif event_type == "worker_disconnected":
+        log_type = "worker"
+        message = f"Worker {data.get('worker_id')} disconnected"
+
+    if log_type and message:
+        db.add_log(log_type, message)
+
+
 async def broadcast_progress(data: dict):
     """Send progress update to all dashboard clients."""
+    # Save to database
+    save_activity_log(data)
+    
     message = json.dumps(data)
     disconnected = []
     for ws in dashboard_clients:
@@ -372,12 +405,13 @@ async def dashboard_websocket(websocket: WebSocket):
     await websocket.accept()
     dashboard_clients.append(websocket)
 
-    # Send current status
+    # Send current status including recent logs
     await websocket.send_text(json.dumps({
         "type": "init",
         "status": db.get_status_summary(),
         "books": db.get_all_books(),
-        "workers": db.get_active_workers()
+        "workers": db.get_active_workers(),
+        "logs": db.get_recent_logs(100)
     }))
 
     try:
