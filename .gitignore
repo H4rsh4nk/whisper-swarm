@@ -16,10 +16,12 @@ venv/
 venv_worker/
 /venv_worker/
 /venv_worker/**
+venv_watcher/
 
 ## Environment files
 .env
 .env.*
+!.env.example
 
 ## Editor/OS
 .idea/

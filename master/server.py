@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +36,11 @@ TOKEN_EXPIRE_HOURS = 24
 # Admin credentials from environment (defaults for development only)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+
+# qBittorrent configuration
+QBITTORRENT_HOST = os.environ.get("QBITTORRENT_HOST", "http://localhost:8080")
+QBITTORRENT_USER = os.environ.get("QBITTORRENT_USER", "admin")
+QBITTORRENT_PASS = os.environ.get("QBITTORRENT_PASS", "adminadmin")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -400,6 +406,56 @@ async def get_status():
         "tasks": db.get_status_summary(),
         "books": db.get_all_books()
     }
+
+
+# ----- Torrent/Magnet Endpoints -----
+
+class MagnetLink(BaseModel):
+    magnet: str
+
+
+@app.post("/magnet")
+async def add_magnet(data: MagnetLink, session_token: Optional[str] = Cookie(None)):
+    """Add a magnet link to qBittorrent. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    magnet = data.magnet.strip()
+    if not magnet.startswith("magnet:"):
+        raise HTTPException(status_code=400, detail="Invalid magnet link")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # Login to qBittorrent
+            login_resp = await client.post(
+                f"{QBITTORRENT_HOST}/api/v2/auth/login",
+                data={"username": QBITTORRENT_USER, "password": QBITTORRENT_PASS}
+            )
+            
+            if login_resp.text != "Ok.":
+                raise HTTPException(status_code=500, detail="Failed to connect to qBittorrent")
+            
+            # Get the session cookie
+            cookies = login_resp.cookies
+            
+            # Add the torrent
+            add_resp = await client.post(
+                f"{QBITTORRENT_HOST}/api/v2/torrents/add",
+                data={"urls": magnet},
+                cookies=cookies
+            )
+            
+            if add_resp.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to add torrent")
+        
+        db.add_log("system", f"Added magnet link to qBittorrent")
+        await broadcast_progress({"type": "magnet_added", "magnet": magnet[:50] + "..."})
+        
+        return {"status": "ok", "message": "Torrent added to qBittorrent"}
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"qBittorrent connection error: {str(e)}")
 
 
 # ----- Book Control Endpoints -----

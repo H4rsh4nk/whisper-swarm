@@ -349,6 +349,47 @@
         .log-type.system {
             background: #8b5cf6;
         }
+
+        .magnet-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .magnet-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .magnet-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .magnet-btn {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .magnet-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .magnet-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
     </style>
 </head>
 <body>
@@ -397,6 +438,15 @@
         </div>
 
         <div class="grid">
+            <div class="card" id="magnetCard">
+                <h2>Download from Magnet</h2>
+                <div id="magnetContent">
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to add torrents</p>
+                    </div>
+                </div>
+            </div>
+
             <div class="card" style="grid-column: span 2;">
                 <h2>Audiobooks</h2>
                 <div class="books-list" id="booksList">
@@ -477,6 +527,50 @@
             }
         }
 
+        async function addMagnet(event) {
+            event.preventDefault();
+            const input = document.getElementById('magnetInput');
+            const btn = document.getElementById('magnetBtn');
+            const magnet = input.value.trim();
+            
+            if (!magnet.startsWith('magnet:')) {
+                addLog('error', 'Invalid magnet link');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+            
+            try {
+                const resp = await fetch('/magnet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ magnet: magnet })
+                });
+                
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                const data = await resp.json();
+                
+                if (resp.ok) {
+                    addLog('system', 'Torrent added to qBittorrent');
+                    input.value = '';
+                } else {
+                    addLog('error', data.detail || 'Failed to add torrent');
+                }
+            } catch (err) {
+                addLog('error', `Failed to add torrent: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add Torrent';
+            }
+        }
+
         // Check auth status on page load
         async function checkAuth() {
             try {
@@ -492,6 +586,7 @@
         function updateAuthUI(authenticated, username) {
             const authContainer = document.getElementById('authContainer');
             const uploadContent = document.getElementById('uploadContent');
+            const magnetContent = document.getElementById('magnetContent');
 
             if (authenticated) {
                 // Show logout button with username
@@ -514,6 +609,18 @@
                     </div>
                 `;
 
+                // Show magnet form
+                magnetContent.innerHTML = `
+                    <form class="magnet-form" onsubmit="addMagnet(event)">
+                        <input type="text" class="magnet-input" id="magnetInput" 
+                               placeholder="Paste magnet link here..." required>
+                        <button type="submit" class="magnet-btn" id="magnetBtn">Add Torrent</button>
+                    </form>
+                    <p style="color: #64748b; font-size: 12px; margin-top: 10px;">
+                        Torrent will download via qBittorrent, then auto-upload when complete
+                    </p>
+                `;
+
                 // Re-attach upload event listeners
                 setupUploadHandlers();
                 
@@ -527,6 +634,13 @@
                 uploadContent.innerHTML = `
                     <div class="login-prompt">
                         <p><a href="/login">Login</a> to upload audiobooks</p>
+                    </div>
+                `;
+
+                // Show login prompt for magnet
+                magnetContent.innerHTML = `
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to add torrents</p>
                     </div>
                 `;
 
