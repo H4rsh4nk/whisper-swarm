@@ -1,8 +1,7 @@
+# Install ffmpeg alongside Python
 [phases.setup]
 nixPkgs = ["ffmpeg"]
-
-[phases.install]
-cmds = ["pip install -r master/requirements.txt"]
+aptPkgs = ["ffmpeg"]
 
 [start]
 cmd = "cd master && python server.py"
