@@ -380,6 +380,56 @@ async def get_status():
     }
 
 
+# ----- Book Control Endpoints -----
+
+@app.post("/books/{book_id}/pause")
+async def pause_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Pause processing of a specific book. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    db.pause_book(book_id)
+    await broadcast_progress({"type": "book_paused", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} paused")
+    return {"status": "paused", "book_id": book_id}
+
+
+@app.post("/books/{book_id}/resume")
+async def resume_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Resume processing of a specific book. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    db.resume_book(book_id)
+    await broadcast_progress({"type": "book_resumed", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} resumed")
+    return {"status": "resumed", "book_id": book_id}
+
+
+@app.delete("/books/{book_id}")
+async def delete_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Delete a book and all its tasks/chunks. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Get chunk paths and delete from database
+    chunk_paths = db.delete_book(book_id)
+    
+    # Delete chunk files
+    for chunk_path in chunk_paths:
+        try:
+            Path(chunk_path).unlink(missing_ok=True)
+        except:
+            pass
+    
+    await broadcast_progress({"type": "book_deleted", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} deleted")
+    return {"status": "deleted", "book_id": book_id}
+
+
 @app.post("/workers/register")
 async def register_worker(data: WorkerRegister):
     """Register a new worker."""
