@@ -167,6 +167,8 @@
             background: #334155;
             border-radius: 8px;
             padding: 15px;
+            padding-bottom: 45px;
+            position: relative;
         }
 
         .book-header {
@@ -243,15 +245,124 @@
             color: #64748b;
             font-style: italic;
         }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .auth-btn {
+            padding: 8px 16px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .auth-btn:hover {
+            background: #2563eb;
+        }
+
+        .auth-btn.logout {
+            background: #475569;
+        }
+
+        .auth-btn.logout:hover {
+            background: #64748b;
+        }
+
+        .login-prompt {
+            text-align: center;
+            padding: 40px;
+            color: #94a3b8;
+        }
+
+        .login-prompt a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        .login-prompt a:hover {
+            text-decoration: underline;
+        }
+
+        .book-icons {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .book-icon {
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #94a3b8;
+        }
+
+        .book-icon:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .book-icon.pause:hover {
+            color: #f59e0b;
+        }
+
+        .book-icon.resume:hover {
+            color: #22c55e;
+        }
+
+        .book-icon.delete:hover {
+            color: #ef4444;
+        }
+
+        .book-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .book-status.paused {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .log-type.system {
+            background: #8b5cf6;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>Distributed STT Dashboard</h1>
-            <div class="status-badge">
-                <div class="status-dot"></div>
-                <span id="connectionStatus">Connecting...</span>
+            <div class="header-right">
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    <span id="connectionStatus">Connecting...</span>
+                </div>
+                <div id="authContainer">
+                    <a href="/login" class="auth-btn">Login</a>
+                </div>
             </div>
         </header>
 
@@ -274,15 +385,13 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" id="uploadCard">
                 <h2>Upload Audiobook</h2>
-                <div class="upload-zone" id="uploadZone">
-                    <div class="upload-icon">📁</div>
-                    <div>Drop audio file here or click to upload</div>
-                    <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
-                        Supports: MP3, WAV, M4A, FLAC, OGG
+                <div id="uploadContent">
+                    <!-- Will be populated by JavaScript based on auth status -->
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to upload audiobooks</p>
                     </div>
-                    <input type="file" id="fileInput" accept="audio/*">
                 </div>
             </div>
         </div>
@@ -306,11 +415,154 @@
 
     <script>
         let ws;
+        let isAuthenticated = false;
         let state = {
             workers: [],
             books: [],
             status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 }
         };
+
+        // Book control functions
+        async function pauseBook(bookId) {
+            try {
+                const resp = await fetch(`/books/${bookId}/pause`, {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                refreshBooks();
+            } catch (err) {
+                addLog('error', `Failed to pause: ${err.message}`);
+            }
+        }
+
+        async function resumeBook(bookId) {
+            try {
+                const resp = await fetch(`/books/${bookId}/resume`, {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                refreshBooks();
+            } catch (err) {
+                addLog('error', `Failed to resume: ${err.message}`);
+            }
+        }
+
+        async function deleteBook(bookId, filename) {
+            if (!confirm(`Are you sure you want to delete "${filename}"?\n\nThis will remove all chunks and transcripts for this book.`)) {
+                return;
+            }
+            try {
+                const resp = await fetch(`/books/${bookId}`, {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                refreshBooks();
+            } catch (err) {
+                addLog('error', `Failed to delete: ${err.message}`);
+            }
+        }
+
+        // Check auth status on page load
+        async function checkAuth() {
+            try {
+                const resp = await fetch('/auth/status');
+                const data = await resp.json();
+                isAuthenticated = data.authenticated;
+                updateAuthUI(data.authenticated, data.username);
+            } catch (err) {
+                console.error('Auth check failed:', err);
+            }
+        }
+
+        function updateAuthUI(authenticated, username) {
+            const authContainer = document.getElementById('authContainer');
+            const uploadContent = document.getElementById('uploadContent');
+
+            if (authenticated) {
+                // Show logout button with username
+                authContainer.innerHTML = `
+                    <span style="color: #94a3b8; font-size: 14px;">${username}</span>
+                    <form action="/logout" method="POST" style="display: inline;">
+                        <button type="submit" class="auth-btn logout">Logout</button>
+                    </form>
+                `;
+
+                // Show upload zone
+                uploadContent.innerHTML = `
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">📁</div>
+                        <div>Drop audio file here or click to upload</div>
+                        <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
+                            Supports: MP3, WAV, M4A, FLAC, OGG
+                        </div>
+                        <input type="file" id="fileInput" accept="audio/*">
+                    </div>
+                `;
+
+                // Re-attach upload event listeners
+                setupUploadHandlers();
+                
+                // Update books to show controls
+                updateBooks();
+            } else {
+                // Show login button
+                authContainer.innerHTML = `<a href="/login" class="auth-btn">Login</a>`;
+
+                // Show login prompt
+                uploadContent.innerHTML = `
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to upload audiobooks</p>
+                    </div>
+                `;
+
+                // Update books to hide controls
+                updateBooks();
+            }
+        }
+
+        function setupUploadHandlers() {
+            const uploadZone = document.getElementById('uploadZone');
+            const fileInput = document.getElementById('fileInput');
+
+            if (!uploadZone || !fileInput) return;
+
+            uploadZone.addEventListener('click', () => fileInput.click());
+
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) uploadFile(file);
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+            });
+        }
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -338,6 +590,26 @@
                     state.books = data.books;
                     state.workers = data.workers;
                     updateUI();
+                    // Load persisted logs
+                    if (data.logs && data.logs.length > 0) {
+                        loadPersistedLogs(data.logs);
+                    }
+                    // Set processing state
+                    break;
+
+                case 'book_paused':
+                    addLog('book', `Book ${data.book_id} paused`);
+                    refreshBooks();
+                    break;
+
+                case 'book_resumed':
+                    addLog('book', `Book ${data.book_id} resumed`);
+                    refreshBooks();
+                    break;
+
+                case 'book_deleted':
+                    addLog('book', `Book ${data.book_id} deleted`);
+                    refreshBooks();
                     break;
 
                 case 'book_added':
@@ -416,20 +688,71 @@
                 container.innerHTML = state.books.map(book => {
                     const percent = Math.round(book.completed_chunks / book.total_chunks * 100);
                     const isComplete = book.completed_chunks === book.total_chunks;
+                    const isPaused = book.paused === 1;
+                    const filename = book.original_filename || book.book_id;
+                    
+                    // Build icons HTML (only shown when authenticated)
+                    let iconsHtml = '';
+                    if (isAuthenticated) {
+                        iconsHtml = `
+                            <div class="book-icons">
+                                ${!isComplete ? (isPaused 
+                                    ? `<button class="book-icon resume" onclick="resumeBook('${book.book_id}')" title="Resume">▶</button>`
+                                    : `<button class="book-icon pause" onclick="pauseBook('${book.book_id}')" title="Pause">⏸</button>`
+                                ) : ''}
+                                <button class="book-icon delete" onclick="deleteBook('${book.book_id}', '${filename.replace(/'/g, "\\'")}')" title="Delete">✕</button>
+                            </div>
+                        `;
+                    }
+                    
+                    // Download button for completed books
+                    let downloadHtml = isComplete 
+                        ? `<a href="/results/${book.book_id}" class="download-btn" style="margin-top: 10px;">Download Transcript</a>` 
+                        : '';
+                    
                     return `
                         <div class="book-item">
+                            ${iconsHtml}
                             <div class="book-header">
-                                <span class="book-name">${book.original_filename || book.book_id}</span>
-                                <span class="book-progress">${book.completed_chunks}/${book.total_chunks} chunks (${percent}%)</span>
+                                <span class="book-name">${filename}</span>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    ${isPaused ? '<span class="book-status paused">Paused</span>' : ''}
+                                    <span class="book-progress">${book.completed_chunks}/${book.total_chunks} chunks (${percent}%)</span>
+                                </div>
                             </div>
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: ${percent}%"></div>
                             </div>
-                            ${isComplete ? `<a href="/results/${book.book_id}" class="download-btn">Download Transcript</a>` : ''}
+                            ${downloadHtml}
                         </div>
                     `;
                 }).join('');
             }
+        }
+
+        function loadPersistedLogs(logs) {
+            const container = document.getElementById('activityLog');
+            
+            // Clear empty state
+            const emptyState = container.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+            
+            // Clear existing logs
+            container.innerHTML = '';
+            
+            // Logs come in descending order (newest first), display them
+            logs.forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                // Format the timestamp from the database
+                const time = new Date(log.created_at).toLocaleTimeString();
+                entry.innerHTML = `
+                    <span class="log-time">${time}</span>
+                    <span class="log-type ${log.log_type}">${log.log_type}</span>
+                    <span>${log.message}</span>
+                `;
+                container.appendChild(entry);
+            });
         }
 
         function addLog(type, message) {
@@ -471,32 +794,6 @@
             updateWorkers();
         }
 
-        // File upload handling
-        const uploadZone = document.getElementById('uploadZone');
-        const fileInput = document.getElementById('fileInput');
-
-        uploadZone.addEventListener('click', () => fileInput.click());
-
-        uploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadZone.classList.add('dragover');
-        });
-
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.classList.remove('dragover');
-        });
-
-        uploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadZone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) uploadFile(file);
-        });
-
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files[0]) uploadFile(fileInput.files[0]);
-        });
-
         async function uploadFile(file) {
             addLog('book', `Uploading ${file.name}...`);
 
@@ -506,17 +803,30 @@
             try {
                 const resp = await fetch('/upload', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    credentials: 'same-origin'
                 });
+
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required. Please login.');
+                    window.location.href = '/login';
+                    return;
+                }
+
                 const data = await resp.json();
-                addLog('book', `Upload complete: ${data.chunks_created} chunks created`);
-                refreshBooks();
+                if (resp.ok) {
+                    addLog('book', `Upload complete: ${data.chunks_created} chunks created`);
+                    refreshBooks();
+                } else {
+                    addLog('error', `Upload failed: ${data.detail || 'Unknown error'}`);
+                }
             } catch (err) {
                 addLog('error', `Upload failed: ${err.message}`);
             }
         }
 
-        // Start connection
+        // Initialize
+        checkAuth();
         connect();
     </script>
 </body>

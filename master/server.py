@@ -6,19 +6,62 @@ Handles task distribution, progress tracking, and result aggregation.
 import asyncio
 import json
 import os
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from dotenv import load_dotenv
+from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from database import Database
 from audio_splitter import AudioSplitter
+
+# Load environment variables from .env file
+load_dotenv()
+
+# ----- Auth Configuration -----
+SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+ALGORITHM = "HS256"
+TOKEN_EXPIRE_HOURS = 24
+
+# Admin credentials from environment (defaults for development only)
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    """Create a JWT token."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(hours=TOKEN_EXPIRE_HOURS))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> Optional[str]:
+    """Verify JWT token and return username if valid."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        return username
+    except JWTError:
+        return None
+
+
+def get_current_user(session_token: Optional[str] = Cookie(None)) -> Optional[str]:
+    """Get current user from session cookie."""
+    if not session_token:
+        return None
+    return verify_token(session_token)
 
 # Configuration
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
@@ -63,8 +106,41 @@ class WorkerRegister(BaseModel):
 
 # ----- WebSocket Management -----
 
+def save_activity_log(data: dict):
+    """Save activity log to database based on event type."""
+    event_type = data.get("type")
+    log_type = None
+    message = None
+
+    if event_type == "book_added":
+        log_type = "book"
+        message = f"New book: {data.get('filename')} ({data.get('total_chunks')} chunks)"
+    elif event_type == "task_assigned":
+        log_type = "task"
+        message = f"Chunk {data.get('chunk_id')} assigned to {data.get('worker_id')}"
+    elif event_type == "task_completed":
+        log_type = "task"
+        pt = data.get('processing_time', 0)
+        message = f"Chunk {data.get('chunk_id')} completed by {data.get('worker_id')} ({pt:.1f}s)"
+    elif event_type == "book_completed":
+        log_type = "book"
+        message = f"Book {data.get('book_id')} fully transcribed!"
+    elif event_type == "worker_connected" or event_type == "worker_joined":
+        log_type = "worker"
+        message = f"Worker {data.get('worker_id') or data.get('hostname')} connected"
+    elif event_type == "worker_disconnected":
+        log_type = "worker"
+        message = f"Worker {data.get('worker_id')} disconnected"
+
+    if log_type and message:
+        db.add_log(log_type, message)
+
+
 async def broadcast_progress(data: dict):
     """Send progress update to all dashboard clients."""
+    # Save to database
+    save_activity_log(data)
+    
     message = json.dumps(data)
     disconnected = []
     for ws in dashboard_clients:
@@ -85,9 +161,62 @@ async def dashboard():
     return dashboard_path.read_text(encoding="utf-8")
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    """Serve the login page."""
+    login_path = Path(__file__).parent / "login.html"
+    return login_path.read_text(encoding="utf-8")
+
+
+@app.post("/login")
+async def login(
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    """Authenticate and set session cookie."""
+    if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Create token and set cookie
+    token = create_access_token(data={"sub": username})
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        max_age=TOKEN_EXPIRE_HOURS * 3600,
+        samesite="lax"
+    )
+    return response
+
+
+@app.post("/logout")
+async def logout():
+    """Clear session cookie."""
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("session_token")
+    return response
+
+
+@app.get("/auth/status")
+async def auth_status(session_token: Optional[str] = Cookie(None)):
+    """Check if user is logged in."""
+    user = get_current_user(session_token)
+    return {"authenticated": user is not None, "username": user}
+
+
 @app.post("/upload")
-async def upload_audiobook(file: UploadFile = File(...)):
-    """Upload an audiobook and split it into chunks."""
+async def upload_audiobook(
+    file: UploadFile = File(...),
+    session_token: Optional[str] = Cookie(None)
+):
+    """Upload an audiobook and split it into chunks. Requires admin auth."""
+    # Check authentication
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     book_id = str(uuid.uuid4())[:8]
 
     # Save uploaded file
@@ -251,6 +380,56 @@ async def get_status():
     }
 
 
+# ----- Book Control Endpoints -----
+
+@app.post("/books/{book_id}/pause")
+async def pause_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Pause processing of a specific book. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    db.pause_book(book_id)
+    await broadcast_progress({"type": "book_paused", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} paused")
+    return {"status": "paused", "book_id": book_id}
+
+
+@app.post("/books/{book_id}/resume")
+async def resume_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Resume processing of a specific book. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    db.resume_book(book_id)
+    await broadcast_progress({"type": "book_resumed", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} resumed")
+    return {"status": "resumed", "book_id": book_id}
+
+
+@app.delete("/books/{book_id}")
+async def delete_book(book_id: str, session_token: Optional[str] = Cookie(None)):
+    """Delete a book and all its tasks/chunks. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Get chunk paths and delete from database
+    chunk_paths = db.delete_book(book_id)
+    
+    # Delete chunk files
+    for chunk_path in chunk_paths:
+        try:
+            Path(chunk_path).unlink(missing_ok=True)
+        except:
+            pass
+    
+    await broadcast_progress({"type": "book_deleted", "book_id": book_id})
+    db.add_log("book", f"Book {book_id} deleted")
+    return {"status": "deleted", "book_id": book_id}
+
+
 @app.post("/workers/register")
 async def register_worker(data: WorkerRegister):
     """Register a new worker."""
@@ -276,12 +455,13 @@ async def dashboard_websocket(websocket: WebSocket):
     await websocket.accept()
     dashboard_clients.append(websocket)
 
-    # Send current status
+    # Send current status including recent logs
     await websocket.send_text(json.dumps({
         "type": "init",
         "status": db.get_status_summary(),
         "books": db.get_all_books(),
-        "workers": db.get_active_workers()
+        "workers": db.get_active_workers(),
+        "logs": db.get_recent_logs(100)
     }))
 
     try:
