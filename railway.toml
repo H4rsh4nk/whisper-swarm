@@ -1,9 +1,5 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
 
 [deploy]
-startCommand = "cd master && python server.py"
-healthcheckPath = "/status"
-healthcheckTimeout = 100
 restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3
