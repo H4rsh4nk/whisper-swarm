@@ -59,7 +59,7 @@ class STTWorker:
 
     async def register(self):
         """Register with the master server."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             await client.post(
                 f"{self.master_url}/workers/register",
                 json={"worker_id": WORKER_ID, "hostname": HOSTNAME}
@@ -89,7 +89,7 @@ class STTWorker:
 
     async def heartbeat(self):
         """Send periodic heartbeat to master."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             while self.running:
                 try:
                     await client.post(f"{self.master_url}/workers/{WORKER_ID}/heartbeat")
@@ -99,7 +99,7 @@ class STTWorker:
 
     async def get_next_task(self) -> dict | None:
         """Get next available task from master."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 resp = await client.get(
                     f"{self.master_url}/tasks/next",
@@ -116,7 +116,7 @@ class STTWorker:
         chunk_filename = Path(chunk_path).name
         local_path = TEMP_DIR / chunk_filename
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(f"{self.master_url}/chunks/{chunk_filename}")
             local_path.write_bytes(resp.content)
 
@@ -149,7 +149,7 @@ class STTWorker:
 
     async def submit_result(self, task_id: str, transcript: dict, processing_time: float):
         """Submit transcription result to master."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
                 f"{self.master_url}/tasks/complete",
                 json={
