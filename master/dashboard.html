@@ -243,15 +243,65 @@
             color: #64748b;
             font-style: italic;
         }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .auth-btn {
+            padding: 8px 16px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .auth-btn:hover {
+            background: #2563eb;
+        }
+
+        .auth-btn.logout {
+            background: #475569;
+        }
+
+        .auth-btn.logout:hover {
+            background: #64748b;
+        }
+
+        .login-prompt {
+            text-align: center;
+            padding: 40px;
+            color: #94a3b8;
+        }
+
+        .login-prompt a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        .login-prompt a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>Distributed STT Dashboard</h1>
-            <div class="status-badge">
-                <div class="status-dot"></div>
-                <span id="connectionStatus">Connecting...</span>
+            <div class="header-right">
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    <span id="connectionStatus">Connecting...</span>
+                </div>
+                <div id="authContainer">
+                    <a href="/login" class="auth-btn">Login</a>
+                </div>
             </div>
         </header>
 
@@ -274,15 +324,13 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" id="uploadCard">
                 <h2>Upload Audiobook</h2>
-                <div class="upload-zone" id="uploadZone">
-                    <div class="upload-icon">📁</div>
-                    <div>Drop audio file here or click to upload</div>
-                    <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
-                        Supports: MP3, WAV, M4A, FLAC, OGG
+                <div id="uploadContent">
+                    <!-- Will be populated by JavaScript based on auth status -->
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to upload audiobooks</p>
                     </div>
-                    <input type="file" id="fileInput" accept="audio/*">
                 </div>
             </div>
         </div>
@@ -306,11 +354,93 @@
 
     <script>
         let ws;
+        let isAuthenticated = false;
         let state = {
             workers: [],
             books: [],
             status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 }
         };
+
+        // Check auth status on page load
+        async function checkAuth() {
+            try {
+                const resp = await fetch('/auth/status');
+                const data = await resp.json();
+                isAuthenticated = data.authenticated;
+                updateAuthUI(data.authenticated, data.username);
+            } catch (err) {
+                console.error('Auth check failed:', err);
+            }
+        }
+
+        function updateAuthUI(authenticated, username) {
+            const authContainer = document.getElementById('authContainer');
+            const uploadContent = document.getElementById('uploadContent');
+
+            if (authenticated) {
+                // Show logout button with username
+                authContainer.innerHTML = `
+                    <span style="color: #94a3b8; font-size: 14px;">${username}</span>
+                    <form action="/logout" method="POST" style="display: inline;">
+                        <button type="submit" class="auth-btn logout">Logout</button>
+                    </form>
+                `;
+
+                // Show upload zone
+                uploadContent.innerHTML = `
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">📁</div>
+                        <div>Drop audio file here or click to upload</div>
+                        <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
+                            Supports: MP3, WAV, M4A, FLAC, OGG
+                        </div>
+                        <input type="file" id="fileInput" accept="audio/*">
+                    </div>
+                `;
+
+                // Re-attach upload event listeners
+                setupUploadHandlers();
+            } else {
+                // Show login button
+                authContainer.innerHTML = `<a href="/login" class="auth-btn">Login</a>`;
+
+                // Show login prompt
+                uploadContent.innerHTML = `
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to upload audiobooks</p>
+                    </div>
+                `;
+            }
+        }
+
+        function setupUploadHandlers() {
+            const uploadZone = document.getElementById('uploadZone');
+            const fileInput = document.getElementById('fileInput');
+
+            if (!uploadZone || !fileInput) return;
+
+            uploadZone.addEventListener('click', () => fileInput.click());
+
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) uploadFile(file);
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+            });
+        }
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -471,32 +601,6 @@
             updateWorkers();
         }
 
-        // File upload handling
-        const uploadZone = document.getElementById('uploadZone');
-        const fileInput = document.getElementById('fileInput');
-
-        uploadZone.addEventListener('click', () => fileInput.click());
-
-        uploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadZone.classList.add('dragover');
-        });
-
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.classList.remove('dragover');
-        });
-
-        uploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadZone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) uploadFile(file);
-        });
-
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files[0]) uploadFile(fileInput.files[0]);
-        });
-
         async function uploadFile(file) {
             addLog('book', `Uploading ${file.name}...`);
 
@@ -506,17 +610,30 @@
             try {
                 const resp = await fetch('/upload', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    credentials: 'same-origin'
                 });
+
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required. Please login.');
+                    window.location.href = '/login';
+                    return;
+                }
+
                 const data = await resp.json();
-                addLog('book', `Upload complete: ${data.chunks_created} chunks created`);
-                refreshBooks();
+                if (resp.ok) {
+                    addLog('book', `Upload complete: ${data.chunks_created} chunks created`);
+                    refreshBooks();
+                } else {
+                    addLog('error', `Upload failed: ${data.detail || 'Unknown error'}`);
+                }
             } catch (err) {
                 addLog('error', `Upload failed: ${err.message}`);
             }
         }
 
-        // Start connection
+        // Initialize
+        checkAuth();
         connect();
     </script>
 </body>

@@ -6,19 +6,62 @@ Handles task distribution, progress tracking, and result aggregation.
 import asyncio
 import json
 import os
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from dotenv import load_dotenv
+from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from database import Database
 from audio_splitter import AudioSplitter
+
+# Load environment variables from .env file
+load_dotenv()
+
+# ----- Auth Configuration -----
+SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+ALGORITHM = "HS256"
+TOKEN_EXPIRE_HOURS = 24
+
+# Admin credentials from environment (defaults for development only)
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    """Create a JWT token."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(hours=TOKEN_EXPIRE_HOURS))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> Optional[str]:
+    """Verify JWT token and return username if valid."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        return username
+    except JWTError:
+        return None
+
+
+def get_current_user(session_token: Optional[str] = Cookie(None)) -> Optional[str]:
+    """Get current user from session cookie."""
+    if not session_token:
+        return None
+    return verify_token(session_token)
 
 # Configuration
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
@@ -85,9 +128,62 @@ async def dashboard():
     return dashboard_path.read_text(encoding="utf-8")
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    """Serve the login page."""
+    login_path = Path(__file__).parent / "login.html"
+    return login_path.read_text(encoding="utf-8")
+
+
+@app.post("/login")
+async def login(
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    """Authenticate and set session cookie."""
+    if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Create token and set cookie
+    token = create_access_token(data={"sub": username})
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        max_age=TOKEN_EXPIRE_HOURS * 3600,
+        samesite="lax"
+    )
+    return response
+
+
+@app.post("/logout")
+async def logout():
+    """Clear session cookie."""
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("session_token")
+    return response
+
+
+@app.get("/auth/status")
+async def auth_status(session_token: Optional[str] = Cookie(None)):
+    """Check if user is logged in."""
+    user = get_current_user(session_token)
+    return {"authenticated": user is not None, "username": user}
+
+
 @app.post("/upload")
-async def upload_audiobook(file: UploadFile = File(...)):
-    """Upload an audiobook and split it into chunks."""
+async def upload_audiobook(
+    file: UploadFile = File(...),
+    session_token: Optional[str] = Cookie(None)
+):
+    """Upload an audiobook and split it into chunks. Requires admin auth."""
+    # Check authentication
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     book_id = str(uuid.uuid4())[:8]
 
     # Save uploaded file
