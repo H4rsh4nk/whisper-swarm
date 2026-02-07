@@ -354,6 +354,28 @@ async def merge_book_results(book_id: str):
     result_path = RESULTS_DIR / f"{book_id}_transcript.json"
     result_path.write_text(json.dumps(result, indent=2))
 
+    # Cleanup: delete chunk files and original upload
+    chunks_deleted = 0
+    for task in tasks:
+        try:
+            chunk_path = Path(task["chunk_path"])
+            if chunk_path.exists():
+                chunk_path.unlink()
+                chunks_deleted += 1
+        except Exception as e:
+            print(f"Failed to delete chunk {task['chunk_path']}: {e}")
+    
+    # Delete the original uploaded audiobook file
+    uploads_deleted = 0
+    try:
+        for upload_file in UPLOAD_DIR.glob(f"{book_id}_*"):
+            upload_file.unlink()
+            uploads_deleted += 1
+    except Exception as e:
+        print(f"Failed to delete upload file: {e}")
+
+    db.add_log("system", f"Cleanup: {chunks_deleted} chunks + {uploads_deleted} uploads deleted for book {book_id}")
+
     await broadcast_progress({
         "type": "book_completed",
         "book_id": book_id,
