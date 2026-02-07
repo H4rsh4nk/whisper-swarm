@@ -1,0 +1,2 @@
+# Root requirements file for Railway deployment
+-r master/requirements.txt

@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["ffmpeg"]
+
+[phases.install]
+cmds = ["pip install -r master/requirements.txt"]
+
+[start]
+cmd = "cd master && python server.py"

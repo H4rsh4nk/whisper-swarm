@@ -1,6 +1,10 @@
 """
 Audio splitter - splits audiobooks into chunks for distributed processing.
 Uses ffmpeg for audio manipulation.
+
+Optimized for minimal bandwidth:
+- MP3 format at 48kbps (speech-optimized, ~7MB per 20-min chunk vs 38MB for WAV)
+- 16kHz mono (optimal for Whisper)
 """
 
 import asyncio
@@ -10,16 +14,21 @@ from pathlib import Path
 
 
 class AudioSplitter:
-    def __init__(self, output_dir: Path, chunk_duration: int = 1200):
+    def __init__(self, output_dir: Path, chunk_duration: int = 1200, 
+                 audio_format: str = "mp3", bitrate: str = "48k"):
         """
         Initialize the audio splitter.
 
         Args:
             output_dir: Directory to store audio chunks
             chunk_duration: Duration of each chunk in seconds (default 20 minutes)
+            audio_format: Output format - "mp3" (small) or "wav" (lossless)
+            bitrate: Bitrate for compressed formats (default 48k, good for speech)
         """
         self.output_dir = Path(output_dir)
         self.chunk_duration = chunk_duration
+        self.audio_format = audio_format
+        self.bitrate = bitrate
         self.output_dir.mkdir(exist_ok=True)
 
     async def get_audio_duration(self, audio_path: Path) -> float:
@@ -60,7 +69,7 @@ class AudioSplitter:
             end_time = min((i + 1) * self.chunk_duration, duration)
 
             chunk_id = f"chunk_{i:04d}"
-            chunk_filename = f"{book_id}_{chunk_id}.wav"
+            chunk_filename = f"{book_id}_{chunk_id}.{self.audio_format}"
             chunk_path = self.output_dir / chunk_filename
 
             tasks.append(self._extract_chunk(
@@ -90,17 +99,34 @@ class AudioSplitter:
     async def _extract_chunk(self, input_path: Path, output_path: Path,
                              start: float, duration: float):
         """Extract a chunk from the audio file."""
+        # Base command
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output
+            "-ss", str(start),  # Seek before input (faster)
             "-i", str(input_path),
-            "-ss", str(start),
             "-t", str(duration),
             "-ar", "16000",  # 16kHz sample rate (optimal for Whisper)
             "-ac", "1",  # Mono
-            "-c:a", "pcm_s16le",  # 16-bit PCM
-            str(output_path)
         ]
+
+        # Format-specific encoding
+        if self.audio_format == "mp3":
+            cmd.extend([
+                "-c:a", "libmp3lame",
+                "-b:a", self.bitrate,  # e.g., "48k" - good for speech
+            ])
+        elif self.audio_format == "opus":
+            cmd.extend([
+                "-c:a", "libopus",
+                "-b:a", self.bitrate,
+            ])
+        else:  # wav (fallback)
+            cmd.extend([
+                "-c:a", "pcm_s16le",  # 16-bit PCM
+            ])
+
+        cmd.append(str(output_path))
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,

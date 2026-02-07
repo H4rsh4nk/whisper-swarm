@@ -323,7 +323,8 @@ async def worker_websocket(websocket: WebSocket, worker_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.environ.get("PORT", 8000))
     print("Starting Distributed STT Master Server...")
-    print("Dashboard: http://localhost:8000")
+    print(f"Dashboard: http://localhost:{port}")
     print("Workers should connect to: http://<your-ip>:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)
