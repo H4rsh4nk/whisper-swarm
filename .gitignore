@@ -17,6 +17,7 @@ venv_worker/
 /venv_worker/
 /venv_worker/**
 venv_watcher/
+.packages/
 
 ## Environment files
 .env
