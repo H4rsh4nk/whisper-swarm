@@ -11,7 +11,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # Configuration
 MASTER_URL = os.environ.get("MASTER_URL", "http://localhost:8000")
@@ -98,9 +98,38 @@ class AudiobookHandler(FileSystemEventHandler):
         except:
             return False
     
+    def check_exists(self, filename: str) -> bool:
+        """Check if the master server already knows about this file."""
+        if not self.session_token:
+            if not self.login():
+                return False
+                
+        try:
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(
+                    f"{MASTER_URL}/books/exists",
+                    params={"filename": filename},
+                    cookies={"session_token": self.session_token}
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("exists", False)
+                elif resp.status_code == 401:
+                    print("[WARN] Session expired during exists check, re-logging in...")
+                    if self.login():
+                        return self.check_exists(filename)
+            return False
+        except Exception as e:
+            print(f"[ERROR] Check exists error: {e}")
+            return False
+
     def process_file(self, file_path: Path):
         """Process a new audio file."""
         if file_path.suffix.lower() not in AUDIO_EXTENSIONS:
+            return
+            
+        # Check if already processed
+        if self.check_exists(file_path.name):
+            print(f"[SKIP] Server already has: {file_path.name}")
             return
             
         # Skip files still being downloaded

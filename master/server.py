@@ -7,7 +7,9 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 import uuid
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -81,6 +83,14 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Distributed STT Master")
 
+
+@app.on_event("startup")
+async def startup_event():
+    """Log storage paths on startup."""
+    print(f"[SERVER] Results (merged MP3 + JSON): {RESULTS_DIR.absolute()}")
+    print(f"[SERVER] Chunks: {CHUNKS_DIR.absolute()}")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -131,6 +141,9 @@ def save_activity_log(data: dict):
     elif event_type == "book_completed":
         log_type = "book"
         message = f"Book {data.get('book_id')} fully transcribed!"
+    elif event_type == "books_cleared":
+        log_type = "system"
+        message = "All audiobooks and history cleared"
     elif event_type == "worker_connected" or event_type == "worker_joined":
         log_type = "worker"
         message = f"Worker {data.get('worker_id') or data.get('hostname')} connected"
@@ -212,6 +225,30 @@ async def auth_status(session_token: Optional[str] = Cookie(None)):
     return {"authenticated": user is not None, "username": user}
 
 
+async def compress_audio_background(input_path: Path, output_path: Path):
+    """Compress audio to a low-bitrate MP3 in the background."""
+    try:
+        # Compress to 32kbps mono MP3 (excellent voice quality, tiny file size)
+        cmd = [
+            "ffmpeg", "-y", "-i", str(input_path),
+            "-vn", "-ar", "22050", "-ac", "1", "-b:a", "32k",
+            str(output_path)
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0:
+            print(f"[COMPRESS] Successfully compressed audio to {output_path.name}")
+        else:
+            print(f"[COMPRESS] Failed to compress audio: {stderr.decode(errors='replace')}")
+    except Exception as e:
+        print(f"[COMPRESS] Exception during compression: {e}")
+
+
 @app.post("/upload")
 async def upload_audiobook(
     file: UploadFile = File(...),
@@ -229,6 +266,13 @@ async def upload_audiobook(
     file_path = UPLOAD_DIR / f"{book_id}_{file.filename}"
     content = await file.read()
     file_path.write_bytes(content)
+
+    # Clean the filename to ensure it's safe for the filesystem (strip folders, trailing spaces)
+    safe_original_name = Path(file.filename).name.strip()
+    
+    # Automatically compress and save a copy to the results directory in the background
+    final_audio_path = RESULTS_DIR / f"{Path(safe_original_name).stem}.mp3"
+    asyncio.create_task(compress_audio_background(file_path, final_audio_path))
 
     # Split into chunks
     chunks = await splitter.split_audio(file_path, book_id)
@@ -356,15 +400,27 @@ async def merge_book_results(book_id: str):
         "full_text": " ".join(seg["text"].strip() for seg in all_segments)
     }
 
-    # Save to results directory
-    result_path = RESULTS_DIR / f"{book_id}_transcript.json"
+    # Save to results directory using original filename
+    safe_original_name = Path(result["filename"]).stem.strip()
+    result_path = RESULTS_DIR / f"{safe_original_name}.json"
     result_path.write_text(json.dumps(result, indent=2))
+
+    # Find the pre-copied original audio if it exists using original filename
+    audio_path = None
+    safe_original_name = Path(result["filename"]).stem.strip()
+    for p in RESULTS_DIR.glob(f"{safe_original_name}.*"):
+        if p.is_file() and p.suffix.lower() != '.json':
+            audio_path = p
+            break
 
     # Cleanup: delete chunk files and original upload
     chunks_deleted = 0
     for task in tasks:
         try:
-            chunk_path = Path(task["chunk_path"])
+            chunk_filename = Path(task["chunk_path"]).name
+            chunk_path = CHUNKS_DIR / chunk_filename
+            if not chunk_path.exists():
+                chunk_path = Path(task["chunk_path"])
             if chunk_path.exists():
                 chunk_path.unlink()
                 chunks_deleted += 1
@@ -385,17 +441,42 @@ async def merge_book_results(book_id: str):
     await broadcast_progress({
         "type": "book_completed",
         "book_id": book_id,
-        "result_path": str(result_path)
+        "result_path": str(result_path),
+        "audio_path": str(audio_path) if audio_path else None
     })
 
 
 @app.get("/results/{book_id}")
 async def get_result(book_id: str):
     """Download completed transcript."""
-    result_path = RESULTS_DIR / f"{book_id}_transcript.json"
+    # Look up the book in the DB to get its original filename
+    books = db.get_all_books()
+    book = next((b for b in books if b["book_id"] == book_id), None)
+    if not book:
+        raise HTTPException(404, "Book not found")
+        
+    safe_original_name = Path(book["original_filename"]).stem.strip()
+    result_path = RESULTS_DIR / f"{safe_original_name}.json"
+    
     if not result_path.exists():
         raise HTTPException(404, "Result not found")
-    return FileResponse(result_path, filename=f"{book_id}_transcript.json")
+    return FileResponse(result_path, filename=f"{safe_original_name}.json")
+
+@app.get("/results/audio/{book_id}")
+async def get_audio_result(book_id: str):
+    """Download the full audio file."""
+    # Look up the book in the DB to get its original filename
+    books = db.get_all_books()
+    book = next((b for b in books if b["book_id"] == book_id), None)
+    if not book:
+        raise HTTPException(404, "Book not found")
+        
+    safe_original_name = Path(book["original_filename"]).stem.strip()
+    
+    for file_path in RESULTS_DIR.glob(f"{safe_original_name}.*"):
+        if file_path.is_file() and file_path.suffix.lower() != '.json':
+            return FileResponse(file_path, filename=f"{safe_original_name}{file_path.suffix}")
+    raise HTTPException(404, "Audio file not found")
 
 
 @app.get("/status")
@@ -404,7 +485,12 @@ async def get_status():
     return {
         "workers": list(connected_clients.keys()),
         "tasks": db.get_status_summary(),
-        "books": db.get_all_books()
+        "books": db.get_all_books(),
+        "paths": {
+            "results": str(RESULTS_DIR.absolute()),
+            "chunks": str(CHUNKS_DIR.absolute()),
+            "uploads": str(UPLOAD_DIR.absolute()),
+        },
     }
 
 
@@ -457,8 +543,67 @@ async def add_magnet(data: MagnetLink, session_token: Optional[str] = Cookie(Non
     except httpx.RequestError as e:
         raise HTTPException(status_code=500, detail=f"qBittorrent connection error: {str(e)}")
 
+@app.get("/torrents/status")
+async def get_torrents_status(session_token: Optional[str] = Cookie(None)):
+    """Get active downloads from qBittorrent. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            # Login to qBittorrent
+            login_resp = await client.post(
+                f"{QBITTORRENT_HOST}/api/v2/auth/login",
+                data={"username": QBITTORRENT_USER, "password": QBITTORRENT_PASS}
+            )
+            
+            if login_resp.text != "Ok.":
+                return {"torrents": []} # Failsafe
+                
+            # Fetch torrent info
+            info_resp = await client.get(
+                f"{QBITTORRENT_HOST}/api/v2/torrents/info",
+                cookies=login_resp.cookies,
+                params={"filter": "downloading"} 
+            )
+            
+            if info_resp.status_code != 200:
+                return {"torrents": []}
+
+            raw_torrents = info_resp.json()
+            torrents = []
+            
+            for t in raw_torrents:
+                # Include seeding/uploading/downloading as long as it's active.
+                torrents.append({
+                    "name": t.get("name", "Unknown"),
+                    "progress": t.get("progress", 0) * 100,
+                    "state": t.get("state", "unknown"),
+                    "dlspeed": t.get("dlspeed", 0),
+                    "eta": t.get("eta", 0)
+                })
+                
+            return {"torrents": torrents}
+            
+    except Exception as e:
+        # In case qBittorrent is down, don't crash the UI
+        return {"torrents": []}
+
+
 
 # ----- Book Control Endpoints -----
+
+@app.get("/books/exists")
+async def check_book_exists(filename: str, session_token: Optional[str] = Cookie(None)):
+    """Check if a book is already uploaded and tracked. Used by watcher."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    exists = db.check_book_exists(filename)
+    return {"exists": exists, "filename": filename}
+
 
 @app.post("/books/{book_id}/pause")
 async def pause_book(book_id: str, session_token: Optional[str] = Cookie(None)):
@@ -506,6 +651,45 @@ async def delete_book(book_id: str, session_token: Optional[str] = Cookie(None))
     await broadcast_progress({"type": "book_deleted", "book_id": book_id})
     db.add_log("book", f"Book {book_id} deleted")
     return {"status": "deleted", "book_id": book_id}
+
+
+@app.delete("/books")
+async def delete_all_books(session_token: Optional[str] = Cookie(None)):
+    """Delete all books, tasks, and output files to clean slate. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # 1. Clear database and get chunk paths
+    chunk_paths = db.delete_all_books()
+    
+    # 2. Delete all chunk files
+    for chunk_path in chunk_paths:
+        try:
+            Path(chunk_path).unlink(missing_ok=True)
+        except:
+            pass
+            
+    # 3. Clear uploads directory
+    for item in UPLOAD_DIR.glob("*"):
+        if item.is_file():
+            try:
+                item.unlink(missing_ok=True)
+            except:
+                pass
+                
+    # 4. Clear results directory 
+    for item in RESULTS_DIR.glob("*"):
+        if item.is_file():
+            try:
+                item.unlink(missing_ok=True)
+            except:
+                pass
+
+    await broadcast_progress({"type": "books_cleared"})
+    db.add_log("system", "All audiobooks and history deleted")
+    return {"status": "all_deleted"}
+
 
 
 @app.post("/workers/register")

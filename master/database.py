@@ -246,6 +246,28 @@ class Database:
         conn.commit()
         conn.close()
         return chunk_paths
+        
+    def check_book_exists(self, filename: str) -> bool:
+        """Check if a book with the given original filename already exists."""
+        conn = self._get_conn()
+        row = conn.execute("SELECT 1 FROM books WHERE original_filename = ?", (filename,)).fetchone()
+        conn.close()
+        return row is not None
+
+    def delete_all_books(self) -> list[str]:
+        """Delete all books and their tasks. Returns list of all chunk paths to delete."""
+        conn = self._get_conn()
+        
+        # Get all chunk paths before deleting
+        rows = conn.execute("SELECT chunk_path FROM tasks").fetchall()
+        chunk_paths = [row[0] for row in rows]
+        
+        # Wipe the tables
+        conn.execute("DELETE FROM tasks")
+        conn.execute("DELETE FROM books")
+        conn.commit()
+        conn.close()
+        return chunk_paths
 
     def is_book_paused(self, book_id: str) -> bool:
         """Check if a book is paused."""

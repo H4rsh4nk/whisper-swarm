@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -57,8 +58,15 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
         }
 
         .grid {
@@ -217,10 +225,21 @@
             margin-right: 8px;
         }
 
-        .log-type.task { background: #3b82f6; }
-        .log-type.worker { background: #22c55e; }
-        .log-type.book { background: #f59e0b; }
-        .log-type.error { background: #ef4444; }
+        .log-type.task {
+            background: #3b82f6;
+        }
+
+        .log-type.worker {
+            background: #22c55e;
+        }
+
+        .log-type.book {
+            background: #f59e0b;
+        }
+
+        .log-type.error {
+            background: #ef4444;
+        }
 
         .download-btn {
             display: inline-block;
@@ -392,6 +411,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -411,7 +431,8 @@
             <div class="card">
                 <h2>Overall Progress</h2>
                 <div class="stat" id="overallPercent">0%</div>
-                <div class="stat-label"><span id="completedTasks">0</span> / <span id="totalTasks">0</span> chunks completed</div>
+                <div class="stat-label"><span id="completedTasks">0</span> / <span id="totalTasks">0</span> chunks
+                    completed</div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill" style="width: 0%"></div>
                 </div>
@@ -447,8 +468,22 @@
                 </div>
             </div>
 
+            <div class="card" id="downloadsCard">
+                <h2>Active Downloads</h2>
+                <div class="books-list" id="downloadsList">
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to view downloads</p>
+                    </div>
+                </div>
+            </div>
+
             <div class="card" style="grid-column: span 2;">
-                <h2>Audiobooks</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin-bottom: 0;">Audiobooks</h2>
+                    <button id="discardAllBtn" class="auth-btn logout"
+                        style="display: none; background: #ef4444; font-size: 12px; padding: 6px 12px;"
+                        onclick="discardAllBooks()">Discard All History</button>
+                </div>
                 <div class="books-list" id="booksList">
                     <span class="empty-state">No audiobooks uploaded yet</span>
                 </div>
@@ -471,6 +506,8 @@
             books: [],
             status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 }
         };
+
+        let torrentPollingInterval = null;
 
         // Book control functions
         async function pauseBook(bookId) {
@@ -527,20 +564,44 @@
             }
         }
 
+        async function discardAllBooks() {
+            if (!confirm("Are you ABSOLUTELY sure you want to discard ALL audiobooks history?\n\nThis will delete all books, tasks, and output files from the server. This cannot be undone!")) {
+                return;
+            }
+            try {
+                const resp = await fetch('/books', {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // Let the websocket 'books_cleared' event handle the UI refresh across all clients
+                if (!resp.ok) {
+                    addLog('error', `Failed to discard history: ${resp.status}`);
+                }
+            } catch (err) {
+                addLog('error', `Failed to discard history: ${err.message}`);
+            }
+        }
+
         async function addMagnet(event) {
             event.preventDefault();
             const input = document.getElementById('magnetInput');
             const btn = document.getElementById('magnetBtn');
             const magnet = input.value.trim();
-            
+
             if (!magnet.startsWith('magnet:')) {
                 addLog('error', 'Invalid magnet link');
                 return;
             }
-            
+
             btn.disabled = true;
             btn.textContent = 'Adding...';
-            
+
             try {
                 const resp = await fetch('/magnet', {
                     method: 'POST',
@@ -548,15 +609,15 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({ magnet: magnet })
                 });
-                
+
                 if (resp.status === 401) {
                     addLog('error', 'Authentication required');
                     window.location.href = '/login';
                     return;
                 }
-                
+
                 const data = await resp.json();
-                
+
                 if (resp.ok) {
                     addLog('system', 'Torrent added to qBittorrent');
                     input.value = '';
@@ -568,6 +629,116 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Add Torrent';
+                fetchTorrentsStatus(); // force instant refresh
+            }
+        }
+
+        async function fetchTorrentsStatus() {
+            if (!isAuthenticated) return;
+            try {
+                const resp = await fetch('/torrents/status', {
+                    credentials: 'same-origin'
+                });
+
+                if (resp.status === 401) {
+                    stopTorrentPolling(true);
+                    return;
+                }
+
+                if (!resp.ok) {
+                    renderTorrents([]);
+                    return;
+                }
+
+                const data = await resp.json();
+                renderTorrents(data.torrents);
+            } catch (err) {
+                console.error("Failed to fetch torrent status:", err);
+                renderTorrents([]);
+            }
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (!+bytes) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        }
+
+        function formatETA(seconds) {
+            if (seconds === 8640000 || seconds < 0) return '∞'; // qBittorrent usually sends 8640000 for infinite
+            if (seconds === 0) return 'Done';
+
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            if (minutes > 0) return `${minutes}m ${secs}s`;
+            return `${secs}s`;
+        }
+
+        function renderTorrents(torrents) {
+            const container = document.getElementById('downloadsList');
+            if (!container) return;
+
+            if (!torrents || torrents.length === 0) {
+                container.innerHTML = '<span class="empty-state">No active downloads</span>';
+                return;
+            }
+
+            container.innerHTML = torrents.map(t => {
+                const speed = t.dlspeed > 0 ? `${formatBytes(t.dlspeed)}/s` : '0 KB/s';
+                const eta = formatETA(t.eta);
+                const percent = t.progress.toFixed(1);
+
+                let stateColor = '#3b82f6'; // default blue
+                if (t.state.includes('error')) stateColor = '#ef4444';
+                else if (t.state.includes('paused')) stateColor = '#f59e0b';
+                else if (percent >= 100) stateColor = '#22c55e';
+
+                return `
+                    <div class="book-item" style="padding-bottom: 15px;">
+                        <div class="book-header">
+                            <span class="book-name" title="${t.name}">${t.name}</span>
+                            <span class="book-status" style="color: ${stateColor}">${percent}%</span>
+                        </div>
+                        <div class="progress-bar" style="margin-top: 5px; margin-bottom: 10px;">
+                            <div class="progress-fill" style="width: ${percent}%; background: ${stateColor}"></div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8;">
+                            <span>↓ ${speed}</span>
+                            <span>ETA: ${eta}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function startTorrentPolling() {
+            if (torrentPollingInterval) return;
+            fetchTorrentsStatus(); // initial fetch
+            torrentPollingInterval = setInterval(fetchTorrentsStatus, 3000); // 3 seconds
+        }
+
+        function stopTorrentPolling(forceLoginPrompt = false) {
+            if (torrentPollingInterval) {
+                clearInterval(torrentPollingInterval);
+                torrentPollingInterval = null;
+            }
+            if (forceLoginPrompt) {
+                const container = document.getElementById('downloadsList');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="login-prompt">
+                            <p><a href="/login">Login</a> to view downloads</p>
+                        </div>
+                    `;
+                }
+            } else if (isAuthenticated) {
+                renderTorrents([]); // Show empty state instead
             }
         }
 
@@ -587,6 +758,7 @@
             const authContainer = document.getElementById('authContainer');
             const uploadContent = document.getElementById('uploadContent');
             const magnetContent = document.getElementById('magnetContent');
+            const discardAllBtn = document.getElementById('discardAllBtn');
 
             if (authenticated) {
                 // Show logout button with username
@@ -596,6 +768,9 @@
                         <button type="submit" class="auth-btn logout">Logout</button>
                     </form>
                 `;
+
+                // Show discard all button
+                if (discardAllBtn) discardAllBtn.style.display = 'block';
 
                 // Show upload zone
                 uploadContent.innerHTML = `
@@ -623,9 +798,12 @@
 
                 // Re-attach upload event listeners
                 setupUploadHandlers();
-                
+
                 // Update books to show controls
                 updateBooks();
+
+                // Start tracking torrents
+                startTorrentPolling();
             } else {
                 // Show login button
                 authContainer.innerHTML = `<a href="/login" class="auth-btn">Login</a>`;
@@ -644,8 +822,14 @@
                     </div>
                 `;
 
+                // Hide discard all button
+                if (discardAllBtn) discardAllBtn.style.display = 'none';
+
                 // Update books to hide controls
                 updateBooks();
+
+                // Stop tracking torrents
+                stopTorrentPolling();
             }
         }
 
@@ -731,6 +915,16 @@
                     refreshBooks();
                     break;
 
+                case 'books_cleared':
+                    addLog('system', 'All audiobooks and history cleared');
+                    refreshBooks();
+
+                    // Also reset progress bars and status since everything is gone
+                    state.status = { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 };
+                    state.books = [];
+                    updateProgress();
+                    break;
+
                 case 'task_assigned':
                     addLog('task', `Chunk ${data.chunk_id} assigned to ${data.worker_id}`);
                     break;
@@ -804,26 +998,31 @@
                     const isComplete = book.completed_chunks === book.total_chunks;
                     const isPaused = book.paused === 1;
                     const filename = book.original_filename || book.book_id;
-                    
+
                     // Build icons HTML (only shown when authenticated)
                     let iconsHtml = '';
                     if (isAuthenticated) {
                         iconsHtml = `
                             <div class="book-icons">
-                                ${!isComplete ? (isPaused 
-                                    ? `<button class="book-icon resume" onclick="resumeBook('${book.book_id}')" title="Resume">▶</button>`
-                                    : `<button class="book-icon pause" onclick="pauseBook('${book.book_id}')" title="Pause">⏸</button>`
-                                ) : ''}
+                                ${!isComplete ? (isPaused
+                                ? `<button class="book-icon resume" onclick="resumeBook('${book.book_id}')" title="Resume">▶</button>`
+                                : `<button class="book-icon pause" onclick="pauseBook('${book.book_id}')" title="Pause">⏸</button>`
+                            ) : ''}
                                 <button class="book-icon delete" onclick="deleteBook('${book.book_id}', '${filename.replace(/'/g, "\\'")}')" title="Delete">✕</button>
                             </div>
                         `;
                     }
-                    
+
                     // Download button for completed books
-                    let downloadHtml = isComplete 
-                        ? `<a href="/results/${book.book_id}" class="download-btn" style="margin-top: 10px;">Download Transcript</a>` 
+                    let downloadHtml = isComplete
+                        ? `
+                          <div style="margin-top: 10px; display: flex; gap: 10px;">
+                              <a href="/results/${book.book_id}" class="download-btn">Download Transcript</a>
+                              <a href="/results/audio/${book.book_id}" class="download-btn" style="background: #eab308; color: black; font-weight: bold;">Download Audio</a>
+                          </div>
+                          `
                         : '';
-                    
+
                     return `
                         <div class="book-item">
                             ${iconsHtml}
@@ -846,14 +1045,14 @@
 
         function loadPersistedLogs(logs) {
             const container = document.getElementById('activityLog');
-            
+
             // Clear empty state
             const emptyState = container.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
-            
+
             // Clear existing logs
             container.innerHTML = '';
-            
+
             // Logs come in descending order (newest first), display them
             logs.forEach(log => {
                 const entry = document.createElement('div');
@@ -944,4 +1143,5 @@
         connect();
     </script>
 </body>
+
 </html>
