@@ -3,6 +3,7 @@ Folder Watcher for Whisper Swarm
 Monitors qBittorrent download folder and uploads completed audiobooks to master server.
 """
 
+import json
 import os
 import time
 import httpx
@@ -19,16 +20,47 @@ WATCH_FOLDER = os.environ.get("WATCH_FOLDER", r"C:\Audiobooks")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 
+# Persisted list of files we've already processed (relative paths, normalized)
+PROCESSED_STATE_FILE = Path(__file__).parent / "processed_files.json"
+
 # Audio file extensions to watch for
 AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.m4b', '.wav', '.flac', '.ogg', '.opus', '.aac'}
 
 
+def _normalize_rel_path(path: Path, watch_path: Path) -> str:
+    """Return a normalized relative path string (forward slashes) for consistent keys."""
+    try:
+        rel = path.resolve().relative_to(watch_path.resolve())
+        return str(rel).replace("\\", "/")
+    except ValueError:
+        return path.name
+
+
+def load_processed_paths() -> set:
+    """Load the set of already-processed relative paths from disk."""
+    if not PROCESSED_STATE_FILE.exists():
+        return set()
+    try:
+        data = json.loads(PROCESSED_STATE_FILE.read_text(encoding="utf-8"))
+        return set(data.get("paths", []))
+    except Exception:
+        return set()
+
+
+def save_processed_paths(paths: set) -> None:
+    """Persist the set of processed paths to disk."""
+    data = {"paths": sorted(paths)}
+    PROCESSED_STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 class AudiobookHandler(FileSystemEventHandler):
     """Handles new audio files appearing in the watch folder."""
-    
-    def __init__(self):
+
+    def __init__(self, watch_path: Path):
+        self.watch_path = watch_path
         self.session_token = None
         self.pending_files = set()  # Files waiting for download to complete
+        self.processed_paths = load_processed_paths()
         
     def login(self) -> bool:
         """Login to master server and get session token."""
@@ -126,23 +158,34 @@ class AudiobookHandler(FileSystemEventHandler):
         """Process a new audio file."""
         if file_path.suffix.lower() not in AUDIO_EXTENSIONS:
             return
-            
-        # Check if already processed
+
+        rel_path = _normalize_rel_path(file_path, self.watch_path)
+
+        # Skip if we've already processed this file (persisted across restarts)
+        if rel_path in self.processed_paths:
+            print(f"[SKIP] Already processed: {rel_path}")
+            return
+
+        # Check if the master server already knows about this file
         if self.check_exists(file_path.name):
             print(f"[SKIP] Server already has: {file_path.name}")
+            self.processed_paths.add(rel_path)
+            save_processed_paths(self.processed_paths)
             return
-            
+
         # Skip files still being downloaded
         if not self.is_file_ready(file_path):
             print(f"[WAIT] File still downloading: {file_path.name}")
             self.pending_files.add(file_path)
             return
-        
+
         # Remove from pending if present
         self.pending_files.discard(file_path)
-        
+
         # Upload the file
-        self.upload_file(file_path)
+        if self.upload_file(file_path):
+            self.processed_paths.add(rel_path)
+            save_processed_paths(self.processed_paths)
     
     def on_created(self, event):
         """Handle new file creation."""
@@ -174,13 +217,16 @@ class AudiobookHandler(FileSystemEventHandler):
     def scan_existing(self):
         """Scan for existing audio files on startup (recursive)."""
         print(f"[SCAN] Checking {WATCH_FOLDER} for existing audio files (including subfolders)...")
-        
-        watch_path = Path(WATCH_FOLDER)
+
+        watch_path = self.watch_path
         for ext in AUDIO_EXTENSIONS:
-            # Use ** for recursive glob
             for file_path in watch_path.glob(f"**/*{ext}"):
                 if file_path.is_file():
-                    print(f"[FOUND] {file_path.relative_to(watch_path)}")
+                    rel = _normalize_rel_path(file_path, watch_path)
+                    if rel in self.processed_paths:
+                        print(f"[SKIP] Already processed: {rel}")
+                        continue
+                    print(f"[FOUND] {rel}")
                     self.process_file(file_path)
 
 
@@ -198,8 +244,8 @@ def main():
     if not watch_path.exists():
         print(f"[ERROR] Watch folder does not exist: {WATCH_FOLDER}")
         return
-    
-    handler = AudiobookHandler()
+
+    handler = AudiobookHandler(watch_path)
     
     # Initial login
     if not handler.login():

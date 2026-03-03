@@ -39,3 +39,4 @@ chunks/
 results/
 stt_tasks.db
 books.db
+watcher/processed_files.json

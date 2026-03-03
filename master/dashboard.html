@@ -241,6 +241,10 @@
             background: #ef4444;
         }
 
+        .log-type.upload {
+            background: #06b6d4;
+        }
+
         .download-btn {
             display: inline-block;
             padding: 6px 12px;
@@ -908,6 +912,30 @@
                 case 'book_deleted':
                     addLog('book', `Book ${data.book_id} deleted`);
                     refreshBooks();
+                    break;
+
+                case 'upload_started':
+                    addLog('upload', `Receiving upload: ${data.filename}`);
+                    break;
+
+                case 'upload_saved':
+                    addLog('upload', `Upload saved: ${data.filename} (${data.size_mb || 0} MB)`);
+                    break;
+
+                case 'splitting_started':
+                    addLog('upload', `Splitting ${data.filename} into ${data.total_chunks} chunks...`);
+                    break;
+
+                case 'splitting_progress':
+                    // Throttle: log every 10 chunks or at completion
+                    const { current, total } = data;
+                    if (current === total || current % 10 === 0) {
+                        addLog('upload', `Splitting: ${current}/${total} chunks`);
+                    }
+                    break;
+
+                case 'splitting_complete':
+                    addLog('upload', `Split complete: ${data.filename} (${data.total_chunks} chunks)`);
                     break;
 
                 case 'book_added':

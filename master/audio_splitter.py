@@ -51,10 +51,13 @@ class AudioSplitter:
         info = json.loads(stdout.decode())
         return float(info["format"]["duration"])
 
-    async def split_audio(self, audio_path: Path, book_id: str) -> list[dict]:
+    async def split_audio(self, audio_path: Path, book_id: str,
+                          progress_callback=None) -> list[dict]:
         """
         Split an audio file into chunks.
 
+        Args:
+            progress_callback: Optional async callback(current, total) called as each chunk completes.
         Returns a list of chunk info dictionaries.
         """
         duration = await self.get_audio_duration(audio_path)
@@ -87,10 +90,15 @@ class AudioSplitter:
 
         # Process chunks in parallel (limit concurrency)
         semaphore = asyncio.Semaphore(4)
+        completed = [0]  # mutable for closure
 
         async def limited_extract(task):
             async with semaphore:
-                return await task
+                result = await task
+                completed[0] += 1
+                if progress_callback:
+                    await progress_callback(completed[0], num_chunks)
+                return result
 
         await asyncio.gather(*[limited_extract(t) for t in tasks])
 

@@ -128,7 +128,23 @@ def save_activity_log(data: dict):
     log_type = None
     message = None
 
-    if event_type == "book_added":
+    if event_type == "upload_started":
+        log_type = "upload"
+        message = f"Receiving upload: {data.get('filename')}"
+    elif event_type == "upload_saved":
+        log_type = "upload"
+        size_mb = data.get('size_mb', 0)
+        message = f"Upload saved: {data.get('filename')} ({size_mb} MB)"
+    elif event_type == "splitting_started":
+        log_type = "upload"
+        message = f"Splitting {data.get('filename')} into {data.get('total_chunks')} chunks..."
+    elif event_type == "splitting_progress":
+        # Don't persist every progress tick to avoid log spam
+        pass
+    elif event_type == "splitting_complete":
+        log_type = "upload"
+        message = f"Split complete: {data.get('filename')} ({data.get('total_chunks')} chunks)"
+    elif event_type == "book_added":
         log_type = "book"
         message = f"New book: {data.get('filename')} ({data.get('total_chunks')} chunks)"
     elif event_type == "task_assigned":
@@ -262,10 +278,24 @@ async def upload_audiobook(
     
     book_id = str(uuid.uuid4())[:8]
 
+    # Broadcast: upload started
+    await broadcast_progress({
+        "type": "upload_started",
+        "filename": file.filename,
+    })
+
     # Save uploaded file
     file_path = UPLOAD_DIR / f"{book_id}_{file.filename}"
     content = await file.read()
     file_path.write_bytes(content)
+
+    # Broadcast: upload saved
+    size_mb = len(content) / (1024 * 1024)
+    await broadcast_progress({
+        "type": "upload_saved",
+        "filename": file.filename,
+        "size_mb": round(size_mb, 2),
+    })
 
     # Clean the filename to ensure it's safe for the filesystem (strip folders, trailing spaces)
     safe_original_name = Path(file.filename).name.strip()
@@ -274,8 +304,31 @@ async def upload_audiobook(
     final_audio_path = RESULTS_DIR / f"{Path(safe_original_name).stem}.mp3"
     asyncio.create_task(compress_audio_background(file_path, final_audio_path))
 
+    # Get duration to know chunk count, then broadcast splitting started
+    duration = await splitter.get_audio_duration(file_path)
+    num_chunks = int(duration // splitter.chunk_duration) + 1
+    await broadcast_progress({
+        "type": "splitting_started",
+        "filename": file.filename,
+        "total_chunks": num_chunks,
+    })
+
+    async def splitting_progress(current: int, total: int):
+        await broadcast_progress({
+            "type": "splitting_progress",
+            "filename": file.filename,
+            "current": current,
+            "total": total,
+        })
+
     # Split into chunks
-    chunks = await splitter.split_audio(file_path, book_id)
+    chunks = await splitter.split_audio(file_path, book_id, progress_callback=splitting_progress)
+
+    await broadcast_progress({
+        "type": "splitting_complete",
+        "filename": file.filename,
+        "total_chunks": len(chunks),
+    })
 
     # Create tasks in database
     for chunk in chunks:
