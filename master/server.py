@@ -107,6 +107,19 @@ splitter = AudioSplitter(CHUNKS_DIR)
 connected_clients: dict[str, WebSocket] = {}
 dashboard_clients: list[WebSocket] = []
 
+# In-progress upload control (upload_id -> cancel or create-as-paused)
+current_upload_id: Optional[str] = None
+current_upload_info: Optional[dict] = None  # { upload_id, filename, phase, current, total, size_mb, chunking_paused }
+upload_cancel_requested: set = set()
+upload_create_paused: set = set()
+upload_chunking_paused: set = set()
+upload_resume_events: dict = {}  # upload_id -> asyncio.Event
+
+
+class UploadCancelled(Exception):
+    """Raised when the user cancels an in-progress upload."""
+    pass
+
 
 class TaskComplete(BaseModel):
     task_id: str
@@ -271,89 +284,235 @@ async def upload_audiobook(
     session_token: Optional[str] = Cookie(None)
 ):
     """Upload an audiobook and split it into chunks. Requires admin auth."""
-    # Check authentication
+    global current_upload_id, current_upload_info
+
     user = get_current_user(session_token)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
-    book_id = str(uuid.uuid4())[:8]
 
-    # Broadcast: upload started
+    upload_id = str(uuid.uuid4())[:8]
+    book_id = upload_id
+    current_upload_id = upload_id
+
+    def _cleanup_cancelled():
+        """Remove upload file and any chunks for this book_id."""
+        global current_upload_id, current_upload_info
+        try:
+            file_path = UPLOAD_DIR / f"{book_id}_{file.filename}"
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            print(f"[UPLOAD] Cleanup file error: {e}")
+        for p in CHUNKS_DIR.glob(f"{book_id}_*"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+        upload_cancel_requested.discard(upload_id)
+        upload_create_paused.discard(upload_id)
+        upload_chunking_paused.discard(upload_id)
+        upload_resume_events.pop(upload_id, None)
+        current_upload_id = None
+        current_upload_info = None
+
+    # Broadcast: upload started (include upload_id for dashboard cancel/pause)
+    current_upload_info = {
+        "upload_id": upload_id,
+        "filename": file.filename,
+        "phase": "receiving",
+        "current": 0,
+        "total": 0,
+        "size_mb": None,
+        "chunking_paused": False,
+    }
     await broadcast_progress({
         "type": "upload_started",
+        "upload_id": upload_id,
         "filename": file.filename,
     })
 
-    # Save uploaded file
-    file_path = UPLOAD_DIR / f"{book_id}_{file.filename}"
-    content = await file.read()
-    file_path.write_bytes(content)
+    try:
+        # Save uploaded file
+        file_path = UPLOAD_DIR / f"{book_id}_{file.filename}"
+        content = await file.read()
+        file_path.write_bytes(content)
 
-    # Broadcast: upload saved
-    size_mb = len(content) / (1024 * 1024)
-    await broadcast_progress({
-        "type": "upload_saved",
-        "filename": file.filename,
-        "size_mb": round(size_mb, 2),
-    })
+        if upload_id in upload_cancel_requested:
+            _cleanup_cancelled()
+            await broadcast_progress({"type": "upload_cancelled", "upload_id": upload_id, "filename": file.filename})
+            return {"cancelled": True, "upload_id": upload_id}
 
-    # Clean the filename to ensure it's safe for the filesystem (strip folders, trailing spaces)
-    safe_original_name = Path(file.filename).name.strip()
-    
-    # Automatically compress and save a copy to the results directory in the background
-    final_audio_path = RESULTS_DIR / f"{Path(safe_original_name).stem}.mp3"
-    asyncio.create_task(compress_audio_background(file_path, final_audio_path))
-
-    # Get duration to know chunk count, then broadcast splitting started
-    duration = await splitter.get_audio_duration(file_path)
-    num_chunks = int(duration // splitter.chunk_duration) + 1
-    await broadcast_progress({
-        "type": "splitting_started",
-        "filename": file.filename,
-        "total_chunks": num_chunks,
-    })
-
-    async def splitting_progress(current: int, total: int):
+        # Broadcast: upload saved
+        size_mb = len(content) / (1024 * 1024)
+        if current_upload_info:
+            current_upload_info["phase"] = "splitting"
+            current_upload_info["size_mb"] = round(size_mb, 2)
         await broadcast_progress({
-            "type": "splitting_progress",
+            "type": "upload_saved",
+            "upload_id": upload_id,
             "filename": file.filename,
-            "current": current,
-            "total": total,
+            "size_mb": round(size_mb, 2),
         })
 
-    # Split into chunks
-    chunks = await splitter.split_audio(file_path, book_id, progress_callback=splitting_progress)
+        safe_original_name = Path(file.filename).name.strip()
+        final_audio_path = RESULTS_DIR / f"{Path(safe_original_name).stem}.mp3"
+        asyncio.create_task(compress_audio_background(file_path, final_audio_path))
 
-    await broadcast_progress({
-        "type": "splitting_complete",
-        "filename": file.filename,
-        "total_chunks": len(chunks),
-    })
+        duration = await splitter.get_audio_duration(file_path)
+        num_chunks = int(duration // splitter.chunk_duration) + 1
+        await broadcast_progress({
+            "type": "splitting_started",
+            "upload_id": upload_id,
+            "filename": file.filename,
+            "total_chunks": num_chunks,
+        })
+        if current_upload_info:
+            current_upload_info["total"] = num_chunks
 
-    # Create tasks in database
-    for chunk in chunks:
-        db.create_task(
-            book_id=book_id,
-            chunk_id=chunk["chunk_id"],
-            chunk_path=chunk["path"],
-            start_time=chunk["start"],
-            end_time=chunk["end"],
-            original_filename=file.filename
-        )
+        async def splitting_progress(current: int, total: int):
+            if upload_id in upload_cancel_requested:
+                raise UploadCancelled()
+            if current_upload_info:
+                current_upload_info["current"] = current
+                current_upload_info["total"] = total
+            await broadcast_progress({
+                "type": "splitting_progress",
+                "upload_id": upload_id,
+                "filename": file.filename,
+                "current": current,
+                "total": total,
+            })
+            # Pause chunking if requested (wait until resume)
+            if upload_id in upload_chunking_paused:
+                ev = upload_resume_events.get(upload_id)
+                if ev is not None:
+                    if current_upload_info:
+                        current_upload_info["chunking_paused"] = True
+                    await broadcast_progress({
+                        "type": "splitting_paused",
+                        "upload_id": upload_id,
+                        "filename": file.filename,
+                        "current": current,
+                        "total": total,
+                    })
+                    await ev.wait()
+                    ev.clear()
+                    if current_upload_info:
+                        current_upload_info["chunking_paused"] = False
+                    await broadcast_progress({
+                        "type": "splitting_resumed",
+                        "upload_id": upload_id,
+                        "filename": file.filename,
+                        "current": current,
+                        "total": total,
+                    })
 
-    # Broadcast update
-    await broadcast_progress({
-        "type": "book_added",
-        "book_id": book_id,
-        "filename": file.filename,
-        "total_chunks": len(chunks)
-    })
+        chunks = await splitter.split_audio(file_path, book_id, progress_callback=splitting_progress)
 
-    return {
-        "book_id": book_id,
-        "filename": file.filename,
-        "chunks_created": len(chunks)
-    }
+        if upload_id in upload_cancel_requested:
+            _cleanup_cancelled()
+            await broadcast_progress({"type": "upload_cancelled", "upload_id": upload_id, "filename": file.filename})
+            return {"cancelled": True, "upload_id": upload_id}
+
+        await broadcast_progress({
+            "type": "splitting_complete",
+            "upload_id": upload_id,
+            "filename": file.filename,
+            "total_chunks": len(chunks),
+        })
+
+        for chunk in chunks:
+            db.create_task(
+                book_id=book_id,
+                chunk_id=chunk["chunk_id"],
+                chunk_path=chunk["path"],
+                start_time=chunk["start"],
+                end_time=chunk["end"],
+                original_filename=file.filename
+            )
+
+        if upload_id in upload_create_paused:
+            db.pause_book(book_id)
+            upload_create_paused.discard(upload_id)
+
+        upload_cancel_requested.discard(upload_id)
+        upload_resume_events.pop(upload_id, None)
+        current_upload_id = None
+
+        await broadcast_progress({
+            "type": "book_added",
+            "book_id": book_id,
+            "filename": file.filename,
+            "total_chunks": len(chunks)
+        })
+
+        current_upload_info = None
+
+        return {
+            "book_id": book_id,
+            "filename": file.filename,
+            "chunks_created": len(chunks)
+        }
+
+    except UploadCancelled:
+        _cleanup_cancelled()
+        await broadcast_progress({"type": "upload_cancelled", "upload_id": upload_id, "filename": file.filename})
+        return {"cancelled": True, "upload_id": upload_id}
+    finally:
+        current_upload_id = None
+        current_upload_info = None
+
+
+@app.post("/upload/{upload_id}/pause-chunking")
+async def pause_upload_chunking(upload_id: str, session_token: Optional[str] = Cookie(None)):
+    """Pause chunk creation for this upload until resume is called. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    upload_chunking_paused.add(upload_id)
+    if upload_id not in upload_resume_events:
+        upload_resume_events[upload_id] = asyncio.Event()
+    return {"status": "chunking_paused", "upload_id": upload_id}
+
+
+@app.post("/upload/{upload_id}/resume-chunking")
+async def resume_upload_chunking(upload_id: str, session_token: Optional[str] = Cookie(None)):
+    """Resume chunk creation after pause. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    upload_chunking_paused.discard(upload_id)
+    ev = upload_resume_events.get(upload_id)
+    if ev is not None:
+        ev.set()
+    return {"status": "chunking_resumed", "upload_id": upload_id}
+
+
+class UploadCancelRequest(BaseModel):
+    upload_id: str
+
+
+@app.post("/upload/cancel")
+async def cancel_upload(
+    data: UploadCancelRequest,
+    session_token: Optional[str] = Cookie(None)
+):
+    """Request cancellation of an in-progress upload. Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    upload_cancel_requested.add(data.upload_id)
+    return {"status": "cancel_requested", "upload_id": data.upload_id}
+
+
+@app.post("/upload/{upload_id}/pause")
+async def pause_upload_when_ready(upload_id: str, session_token: Optional[str] = Cookie(None)):
+    """When this upload completes, create the book as paused (no chunks assigned until resumed). Requires admin auth."""
+    user = get_current_user(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    upload_create_paused.add(upload_id)
+    return {"status": "will_pause_when_ready", "upload_id": upload_id}
 
 
 @app.get("/tasks")
@@ -770,14 +929,17 @@ async def dashboard_websocket(websocket: WebSocket):
     await websocket.accept()
     dashboard_clients.append(websocket)
 
-    # Send current status including recent logs
-    await websocket.send_text(json.dumps({
+    # Send current status including recent logs and current upload (so refresh shows it)
+    init_payload = {
         "type": "init",
         "status": db.get_status_summary(),
         "books": db.get_all_books(),
         "workers": db.get_active_workers(),
         "logs": db.get_recent_logs(100)
-    }))
+    }
+    if current_upload_info is not None:
+        init_payload["current_upload"] = current_upload_info
+    await websocket.send_text(json.dumps(init_payload))
 
     try:
         while True:
