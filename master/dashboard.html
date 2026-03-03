@@ -1,10 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Distributed STT Dashboard</title>
+    <title>Whisper Swarm · Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #0a0b0f;
+            --surface: #12141c;
+            --surface-hover: #181b24;
+            --border: rgba(255, 255, 255, 0.06);
+            --border-strong: rgba(255, 255, 255, 0.1);
+            --text: #f1f3f5;
+            --text-muted: #8b92a0;
+            --text-dim: #5c6370;
+            --accent: #00d4aa;
+            --accent-dim: rgba(0, 212, 170, 0.15);
+            --accent-glow: rgba(0, 212, 170, 0.25);
+            --danger: #ff4757;
+            --danger-dim: rgba(255, 71, 87, 0.15);
+            --warn: #ffb347;
+            --warn-dim: rgba(255, 179, 71, 0.15);
+            --info: #5c9eff;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --radius-pill: 100px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --transition: 0.2s ease;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,48 +40,215 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
+            margin: 0;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .app-body {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            min-height: 0;
+        }
+
+        .app-main {
+            overflow-y: auto;
+            padding: 28px 32px 48px;
+        }
+
+        .app-sidebar {
+            border-left: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .activity-sidebar-card {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
             padding: 20px;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
+        .activity-sidebar-card h2 {
+            margin-bottom: 14px;
+        }
+
+        .activity-log-wrap {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            border-radius: var(--radius-sm);
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+            padding: 12px;
+        }
+
+        .activity-log-wrap::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .activity-log-wrap::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .activity-log-wrap::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .section {
+            margin-bottom: 36px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 14px;
+        }
+
+        .activity-log {
+            max-height: none;
+            height: 100%;
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .pagination-btns {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pagination-btns button {
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            cursor: pointer;
+            font-family: inherit;
+            transition: all var(--transition);
+        }
+
+        .pagination-btns button:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--border-strong);
+        }
+
+        .pagination-btns button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .pagination-btns .page-num {
+            min-width: 32px;
+            padding: 8px 10px;
+            text-align: center;
+        }
+
+        .pagination-btns .page-num.active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        @media (max-width: 1024px) {
+            .app-body {
+                grid-template-columns: 1fr;
+            }
+            .app-sidebar {
+                border-left: none;
+                border-top: 1px solid var(--border);
+                max-height: 40vh;
+            }
         }
 
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #334155;
+            padding: 20px 32px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
 
         h1 {
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
 
         .status-badge {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 16px;
-            background: #1e293b;
-            border-radius: 20px;
-            font-size: 14px;
+            padding: 8px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-pill);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
         }
 
         .status-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: #22c55e;
-            animation: pulse 2s infinite;
+            background: var(--text-dim);
+        }
+
+        .status-badge.connected .status-dot {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent-glow);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-badge.connected {
+            color: var(--accent);
         }
 
         @keyframes pulse {
@@ -63,81 +258,98 @@
 
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
             gap: 20px;
-            margin-bottom: 30px;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        @media (max-width: 640px) {
+            .grid-2 { grid-template-columns: 1fr; }
         }
 
         .card {
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 20px;
-            border: 1px solid #334155;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 22px;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .card:hover {
+            border-color: var(--border-strong);
+            box-shadow: var(--shadow);
         }
 
         .card h2 {
-            font-size: 14px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #94a3b8;
-            margin-bottom: 15px;
+            color: var(--text-dim);
+            margin-bottom: 14px;
         }
 
         .stat {
-            font-size: 36px;
+            font-size: 2rem;
             font-weight: 700;
-            color: #f8fafc;
+            letter-spacing: -0.03em;
+            color: var(--text);
         }
 
         .stat-label {
-            font-size: 14px;
-            color: #64748b;
-            margin-top: 5px;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
         }
 
         .progress-bar {
-            height: 8px;
-            background: #334155;
-            border-radius: 4px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: var(--radius-pill);
             overflow: hidden;
-            margin-top: 15px;
+            margin-top: 14px;
         }
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-            border-radius: 4px;
-            transition: width 0.5s ease;
+            background: linear-gradient(90deg, var(--accent), #00b894);
+            border-radius: var(--radius-pill);
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .upload-zone {
-            border: 2px dashed #475569;
-            border-radius: 12px;
-            padding: 40px;
+            border: 2px dashed var(--border-strong);
+            border-radius: var(--radius);
+            padding: 36px 24px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all var(--transition);
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .upload-zone:hover {
-            border-color: #3b82f6;
-            background: rgba(59, 130, 246, 0.1);
+            border-color: var(--accent);
+            background: var(--accent-dim);
         }
 
         .upload-zone.dragover {
-            border-color: #22c55e;
-            background: rgba(34, 197, 94, 0.1);
+            border-color: var(--accent);
+            background: var(--accent-dim);
         }
 
         .upload-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.9;
         }
 
         .workers-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
 
         .worker-badge {
@@ -145,30 +357,39 @@
             align-items: center;
             gap: 8px;
             padding: 8px 12px;
-            background: #334155;
-            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
             font-size: 13px;
+            font-weight: 500;
         }
 
         .worker-badge .dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: #22c55e;
+            background: var(--accent);
         }
 
         .books-list {
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 12px;
         }
 
         .book-item {
-            background: #334155;
-            border-radius: 8px;
-            padding: 15px;
-            padding-bottom: 45px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            padding-bottom: 44px;
             position: relative;
+            transition: border-color var(--transition), background var(--transition);
+        }
+
+        .book-item:hover {
+            border-color: var(--border-strong);
+            background: rgba(255, 255, 255, 0.04);
         }
 
         .book-header {
@@ -180,61 +401,91 @@
 
         .book-name {
             font-weight: 500;
+            font-size: 14px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 200px;
+            max-width: 220px;
         }
 
         .book-progress {
-            font-size: 14px;
-            color: #94a3b8;
+            font-size: 13px;
+            color: var(--text-muted);
         }
 
         .activity-log {
-            max-height: 300px;
+            max-height: 320px;
             overflow-y: auto;
-            font-family: 'Monaco', 'Menlo', monospace;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
             font-size: 12px;
-            line-height: 1.6;
+            line-height: 1.65;
+            border-radius: var(--radius-sm);
+            background: rgba(0, 0, 0, 0.25);
+            padding: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .activity-log::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .activity-log::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .activity-log::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
         }
 
         .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid #334155;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
         }
 
         .log-time {
-            color: #64748b;
+            color: var(--text-dim);
             margin-right: 10px;
+            font-variant-numeric: tabular-nums;
         }
 
         .log-type {
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 10px;
+            font-weight: 600;
             text-transform: uppercase;
+            letter-spacing: 0.04em;
             margin-right: 8px;
         }
 
-        .log-type.task { background: #3b82f6; }
-        .log-type.worker { background: #22c55e; }
-        .log-type.book { background: #f59e0b; }
-        .log-type.error { background: #ef4444; }
+        .log-type.task { background: rgba(92, 158, 255, 0.2); color: #7eb8ff; }
+        .log-type.worker { background: var(--accent-dim); color: var(--accent); }
+        .log-type.book { background: var(--warn-dim); color: var(--warn); }
+        .log-type.error { background: var(--danger-dim); color: var(--danger); }
+        .log-type.upload { background: rgba(0, 212, 170, 0.2); color: var(--accent); }
+        .log-type.system { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
 
         .download-btn {
             display: inline-block;
-            padding: 6px 12px;
-            background: #3b82f6;
-            color: white;
-            border-radius: 6px;
+            padding: 8px 14px;
+            background: var(--accent);
+            color: var(--bg);
+            border-radius: var(--radius-sm);
             text-decoration: none;
             font-size: 12px;
-            margin-top: 8px;
+            font-weight: 600;
+            margin-top: 10px;
+            transition: opacity var(--transition), transform var(--transition);
         }
 
         .download-btn:hover {
-            background: #2563eb;
+            opacity: 0.9;
+            transform: translateY(-1px);
         }
 
         input[type="file"] {
@@ -242,49 +493,50 @@
         }
 
         .empty-state {
-            color: #64748b;
-            font-style: italic;
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+            color: var(--text-dim);
+            font-size: 13px;
         }
 
         .auth-btn {
-            padding: 8px 16px;
-            background: #3b82f6;
-            color: white;
+            padding: 10px 18px;
+            background: var(--accent);
+            color: var(--bg);
             border: none;
-            border-radius: 8px;
-            font-size: 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
             cursor: pointer;
             text-decoration: none;
-            transition: background 0.2s;
+            transition: opacity var(--transition), transform var(--transition);
+            font-family: inherit;
         }
 
         .auth-btn:hover {
-            background: #2563eb;
+            opacity: 0.9;
+            transform: translateY(-1px);
         }
 
         .auth-btn.logout {
-            background: #475569;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text);
+            border: 1px solid var(--border);
         }
 
         .auth-btn.logout:hover {
-            background: #64748b;
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .login-prompt {
             text-align: center;
-            padding: 40px;
-            color: #94a3b8;
+            padding: 32px 20px;
+            color: var(--text-muted);
+            font-size: 14px;
         }
 
         .login-prompt a {
-            color: #3b82f6;
+            color: var(--accent);
             text-decoration: none;
+            font-weight: 600;
         }
 
         .login-prompt a:hover {
@@ -296,67 +548,170 @@
             bottom: 12px;
             right: 12px;
             display: flex;
-            gap: 8px;
+            gap: 6px;
         }
 
         .book-icon {
-            width: 24px;
-            height: 24px;
-            border: none;
-            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all var(--transition);
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 14px;
-            background: rgba(255, 255, 255, 0.1);
-            color: #94a3b8;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
         }
 
         .book-icon:hover {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--border-strong);
+            color: var(--text);
         }
 
-        .book-icon.pause:hover {
-            color: #f59e0b;
-        }
-
-        .book-icon.resume:hover {
-            color: #22c55e;
-        }
-
-        .book-icon.delete:hover {
-            color: #ef4444;
-        }
+        .book-icon.pause:hover { color: var(--warn); }
+        .book-icon.resume:hover { color: var(--accent); }
+        .book-icon.delete:hover { color: var(--danger); }
 
         .book-status {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 4px 10px;
+            border-radius: var(--radius-pill);
             font-size: 11px;
-            font-weight: 500;
+            font-weight: 600;
             text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .book-status.paused {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
+            background: var(--warn-dim);
+            color: var(--warn);
         }
 
-        .log-type.system {
-            background: #8b5cf6;
+        .magnet-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .magnet-input {
+            flex: 1;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            color: var(--text);
+            transition: border-color var(--transition);
+            font-family: inherit;
+        }
+
+        .magnet-input::placeholder {
+            color: var(--text-dim);
+        }
+
+        .magnet-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .magnet-btn {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: transform var(--transition), box-shadow var(--transition);
+            font-family: inherit;
+        }
+
+        .magnet-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+        }
+
+        .magnet-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .card-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-header-row h2 {
+            margin-bottom: 0;
+        }
+
+        .btn-discard-all {
+            padding: 8px 14px;
+            background: var(--danger-dim);
+            color: var(--danger);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all var(--transition);
+        }
+
+        .btn-discard-all:hover {
+            background: rgba(255, 71, 87, 0.25);
+        }
+
+        .upload-in-progress-card {
+            border-color: rgba(0, 212, 170, 0.35);
+            background: var(--accent-dim);
+        }
+
+        .btn-pause-chunking { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(255, 179, 71, 0.3); }
+        .btn-resume-chunking { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0, 212, 170, 0.3); }
+        .btn-pause-when-ready { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(255, 179, 71, 0.3); }
+        .btn-discard-upload { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(255, 71, 87, 0.3); }
+        .btn-pause-chunking:hover, .btn-resume-chunking:hover, .btn-pause-when-ready:hover, .btn-discard-upload:hover { opacity: 1; transform: translateY(-1px); }
+
+        .download-btn-secondary {
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .download-btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.18);
+        }
+
+        .username-display {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .form-hint {
+            color: var(--text-dim);
+            font-size: 12px;
+            margin-top: 10px;
         }
     </style>
 </head>
+
 <body>
-    <div class="container">
+    <div class="app">
         <header>
-            <h1>Distributed STT Dashboard</h1>
+            <h1>Whisper Swarm</h1>
             <div class="header-right">
-                <div class="status-badge">
+                <div class="status-badge" id="statusBadge">
                     <div class="status-dot"></div>
                     <span id="connectionStatus">Connecting...</span>
                 </div>
@@ -366,50 +721,86 @@
             </div>
         </header>
 
-        <div class="grid">
-            <div class="card">
-                <h2>Overall Progress</h2>
-                <div class="stat" id="overallPercent">0%</div>
-                <div class="stat-label"><span id="completedTasks">0</span> / <span id="totalTasks">0</span> chunks completed</div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-                </div>
-            </div>
+        <div class="app-body">
+            <main class="app-main">
+                <section class="section">
+                    <h2 class="section-title">Overview</h2>
+                    <div class="grid">
+                        <div class="card">
+                            <h2>Progress</h2>
+                            <div class="stat" id="overallPercent">0%</div>
+                            <div class="stat-label"><span id="completedTasks">0</span> / <span id="totalTasks">0</span> chunks</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h2>Workers</h2>
+                            <div class="stat" id="workerCount">0</div>
+                            <div class="stat-label">connected</div>
+                            <div class="workers-list" id="workersList" style="margin-top: 14px;">
+                                <span class="empty-state">No workers</span>
+                            </div>
+                        </div>
+                        <div class="card" id="uploadCard">
+                            <h2>Upload</h2>
+                            <div id="uploadContent">
+                                <div class="login-prompt">
+                                    <p><a href="/login">Login</a> to upload</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-            <div class="card">
-                <h2>Active Workers</h2>
-                <div class="stat" id="workerCount">0</div>
-                <div class="stat-label">connected workers</div>
-                <div class="workers-list" id="workersList" style="margin-top: 15px;">
-                    <span class="empty-state">No workers connected</span>
-                </div>
-            </div>
+                <section class="section">
+                    <h2 class="section-title">Add content</h2>
+                    <div class="grid grid-2">
+                        <div class="card" id="magnetCard">
+                            <h2>Magnet link</h2>
+                            <div id="magnetContent">
+                                <div class="login-prompt">
+                                    <p><a href="/login">Login</a> to add torrents</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card" id="downloadsCard">
+                            <h2>Active downloads</h2>
+                            <div class="books-list" id="downloadsList">
+                                <div class="login-prompt">
+                                    <p><a href="/login">Login</a> to view</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-            <div class="card" id="uploadCard">
-                <h2>Upload Audiobook</h2>
-                <div id="uploadContent">
-                    <!-- Will be populated by JavaScript based on auth status -->
-                    <div class="login-prompt">
-                        <p><a href="/login">Login</a> to upload audiobooks</p>
+                <section class="section">
+                    <h2 class="section-title">Audiobooks</h2>
+                    <div class="card">
+                        <div class="card-header-row">
+                            <h2>Library</h2>
+                            <button id="discardAllBtn" class="btn-discard-all" style="display: none;" onclick="discardAllBooks()">Discard all</button>
+                        </div>
+                        <div id="uploadInProgressContainer" style="display: none; margin-bottom: 16px;"></div>
+                        <div class="books-list" id="booksList">
+                            <span class="empty-state">No audiobooks yet</span>
+                        </div>
+                        <div id="booksPagination" class="pagination" style="display: none;"></div>
+                    </div>
+                </section>
+            </main>
+
+            <aside class="app-sidebar">
+                <div class="card activity-sidebar-card">
+                    <h2>Activity</h2>
+                    <div class="activity-log-wrap">
+                        <div class="activity-log" id="activityLog">
+                            <span class="empty-state">Waiting for activity...</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="grid">
-            <div class="card" style="grid-column: span 2;">
-                <h2>Audiobooks</h2>
-                <div class="books-list" id="booksList">
-                    <span class="empty-state">No audiobooks uploaded yet</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Activity Log</h2>
-                <div class="activity-log" id="activityLog">
-                    <span class="empty-state">Waiting for activity...</span>
-                </div>
-            </div>
+            </aside>
         </div>
     </div>
 
@@ -419,8 +810,14 @@
         let state = {
             workers: [],
             books: [],
-            status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 }
+            booksPage: 1,
+            status: { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 },
+            uploadInProgress: null
         };
+
+        const BOOKS_PER_PAGE = 8;
+
+        let torrentPollingInterval = null;
 
         // Book control functions
         async function pauseBook(bookId) {
@@ -477,6 +874,184 @@
             }
         }
 
+        async function discardAllBooks() {
+            if (!confirm("Are you ABSOLUTELY sure you want to discard ALL audiobooks history?\n\nThis will delete all books, tasks, and output files from the server. This cannot be undone!")) {
+                return;
+            }
+            try {
+                const resp = await fetch('/books', {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // Let the websocket 'books_cleared' event handle the UI refresh across all clients
+                if (!resp.ok) {
+                    addLog('error', `Failed to discard history: ${resp.status}`);
+                }
+            } catch (err) {
+                addLog('error', `Failed to discard history: ${err.message}`);
+            }
+        }
+
+        async function addMagnet(event) {
+            event.preventDefault();
+            const input = document.getElementById('magnetInput');
+            const btn = document.getElementById('magnetBtn');
+            const magnet = input.value.trim();
+
+            if (!magnet.startsWith('magnet:')) {
+                addLog('error', 'Invalid magnet link');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+
+            try {
+                const resp = await fetch('/magnet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ magnet: magnet })
+                });
+
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const data = await resp.json();
+
+                if (resp.ok) {
+                    addLog('system', 'Torrent added to qBittorrent');
+                    input.value = '';
+                } else {
+                    addLog('error', data.detail || 'Failed to add torrent');
+                }
+            } catch (err) {
+                addLog('error', `Failed to add torrent: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add Torrent';
+                fetchTorrentsStatus(); // force instant refresh
+            }
+        }
+
+        async function fetchTorrentsStatus() {
+            if (!isAuthenticated) return;
+            try {
+                const resp = await fetch('/torrents/status', {
+                    credentials: 'same-origin'
+                });
+
+                if (resp.status === 401) {
+                    stopTorrentPolling(true);
+                    return;
+                }
+
+                if (!resp.ok) {
+                    renderTorrents([]);
+                    return;
+                }
+
+                const data = await resp.json();
+                renderTorrents(data.torrents);
+            } catch (err) {
+                console.error("Failed to fetch torrent status:", err);
+                renderTorrents([]);
+            }
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (!+bytes) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        }
+
+        function formatETA(seconds) {
+            if (seconds === 8640000 || seconds < 0) return '∞'; // qBittorrent usually sends 8640000 for infinite
+            if (seconds === 0) return 'Done';
+
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            if (minutes > 0) return `${minutes}m ${secs}s`;
+            return `${secs}s`;
+        }
+
+        function renderTorrents(torrents) {
+            const container = document.getElementById('downloadsList');
+            if (!container) return;
+
+            if (!torrents || torrents.length === 0) {
+                container.innerHTML = '<span class="empty-state">No active downloads</span>';
+                return;
+            }
+
+            container.innerHTML = torrents.map(t => {
+                const speed = t.dlspeed > 0 ? `${formatBytes(t.dlspeed)}/s` : '0 KB/s';
+                const eta = formatETA(t.eta);
+                const percent = t.progress.toFixed(1);
+
+                let stateColor = '#3b82f6'; // default blue
+                if (t.state.includes('error')) stateColor = '#ef4444';
+                else if (t.state.includes('paused')) stateColor = '#f59e0b';
+                else if (percent >= 100) stateColor = '#22c55e';
+
+                return `
+                    <div class="book-item" style="padding-bottom: 15px;">
+                        <div class="book-header">
+                            <span class="book-name" title="${t.name}">${t.name}</span>
+                            <span class="book-status" style="color: ${stateColor}">${percent}%</span>
+                        </div>
+                        <div class="progress-bar" style="margin-top: 5px; margin-bottom: 10px;">
+                            <div class="progress-fill" style="width: ${percent}%; background: ${stateColor}"></div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8;">
+                            <span>↓ ${speed}</span>
+                            <span>ETA: ${eta}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function startTorrentPolling() {
+            if (torrentPollingInterval) return;
+            fetchTorrentsStatus(); // initial fetch
+            torrentPollingInterval = setInterval(fetchTorrentsStatus, 3000); // 3 seconds
+        }
+
+        function stopTorrentPolling(forceLoginPrompt = false) {
+            if (torrentPollingInterval) {
+                clearInterval(torrentPollingInterval);
+                torrentPollingInterval = null;
+            }
+            if (forceLoginPrompt) {
+                const container = document.getElementById('downloadsList');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="login-prompt">
+                            <p><a href="/login">Login</a> to view downloads</p>
+                        </div>
+                    `;
+                }
+            } else if (isAuthenticated) {
+                renderTorrents([]); // Show empty state instead
+            }
+        }
+
         // Check auth status on page load
         async function checkAuth() {
             try {
@@ -492,33 +1067,49 @@
         function updateAuthUI(authenticated, username) {
             const authContainer = document.getElementById('authContainer');
             const uploadContent = document.getElementById('uploadContent');
+            const magnetContent = document.getElementById('magnetContent');
+            const discardAllBtn = document.getElementById('discardAllBtn');
 
             if (authenticated) {
                 // Show logout button with username
                 authContainer.innerHTML = `
-                    <span style="color: #94a3b8; font-size: 14px;">${username}</span>
+                    <span class="username-display">${username}</span>
                     <form action="/logout" method="POST" style="display: inline;">
                         <button type="submit" class="auth-btn logout">Logout</button>
                     </form>
                 `;
 
+                // Show discard all button
+                if (discardAllBtn) discardAllBtn.style.display = 'block';
+
                 // Show upload zone
                 uploadContent.innerHTML = `
                     <div class="upload-zone" id="uploadZone">
                         <div class="upload-icon">📁</div>
-                        <div>Drop audio file here or click to upload</div>
-                        <div style="color: #64748b; font-size: 12px; margin-top: 8px;">
-                            Supports: MP3, WAV, M4A, FLAC, OGG
-                        </div>
+                        <div>Drop audio here or click to upload</div>
+                        <p class="form-hint" style="margin-top: 8px;">MP3, WAV, M4A, FLAC, OGG</p>
                         <input type="file" id="fileInput" accept="audio/*">
                     </div>
                 `;
 
+                // Show magnet form
+                magnetContent.innerHTML = `
+                    <form class="magnet-form" onsubmit="addMagnet(event)">
+                        <input type="text" class="magnet-input" id="magnetInput"
+                               placeholder="Paste magnet link here..." required>
+                        <button type="submit" class="magnet-btn" id="magnetBtn">Add torrent</button>
+                    </form>
+                    <p class="form-hint">Torrent downloads via qBittorrent, then auto-uploads when complete</p>
+                `;
+
                 // Re-attach upload event listeners
                 setupUploadHandlers();
-                
+
                 // Update books to show controls
                 updateBooks();
+
+                // Start tracking torrents
+                startTorrentPolling();
             } else {
                 // Show login button
                 authContainer.innerHTML = `<a href="/login" class="auth-btn">Login</a>`;
@@ -530,8 +1121,21 @@
                     </div>
                 `;
 
+                // Show login prompt for magnet
+                magnetContent.innerHTML = `
+                    <div class="login-prompt">
+                        <p><a href="/login">Login</a> to add torrents</p>
+                    </div>
+                `;
+
+                // Hide discard all button
+                if (discardAllBtn) discardAllBtn.style.display = 'none';
+
                 // Update books to hide controls
                 updateBooks();
+
+                // Stop tracking torrents
+                stopTorrentPolling();
             }
         }
 
@@ -570,10 +1174,12 @@
 
             ws.onopen = () => {
                 document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('statusBadge').classList.add('connected');
             };
 
             ws.onclose = () => {
                 document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('statusBadge').classList.remove('connected');
                 setTimeout(connect, 3000);
             };
 
@@ -589,12 +1195,14 @@
                     state.status = data.status;
                     state.books = data.books;
                     state.workers = data.workers;
+                    if (data.current_upload) {
+                        state.uploadInProgress = data.current_upload;
+                    }
                     updateUI();
                     // Load persisted logs
                     if (data.logs && data.logs.length > 0) {
                         loadPersistedLogs(data.logs);
                     }
-                    // Set processing state
                     break;
 
                 case 'book_paused':
@@ -612,9 +1220,90 @@
                     refreshBooks();
                     break;
 
+                case 'upload_started':
+                    state.uploadInProgress = { upload_id: data.upload_id, filename: data.filename, phase: 'receiving', current: 0, total: 0, size_mb: null };
+                    addLog('upload', `Receiving upload: ${data.filename}`);
+                    updateUploadInProgress();
+                    break;
+
+                case 'upload_saved':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.phase = 'splitting';
+                        state.uploadInProgress.size_mb = data.size_mb;
+                    }
+                    addLog('upload', `Upload saved: ${data.filename} (${data.size_mb || 0} MB)`);
+                    updateUploadInProgress();
+                    break;
+
+                case 'splitting_started':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.total = data.total_chunks || 0;
+                        state.uploadInProgress.current = 0;
+                    }
+                    addLog('upload', `Splitting ${data.filename} into ${data.total_chunks} chunks...`);
+                    updateUploadInProgress();
+                    break;
+
+                case 'splitting_progress':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.current = data.current;
+                        state.uploadInProgress.total = data.total;
+                    }
+                    updateUploadInProgress();
+                    const { current, total } = data;
+                    if (current === total || current % 10 === 0) {
+                        addLog('upload', `Splitting: ${current}/${total} chunks`);
+                    }
+                    break;
+
+                case 'splitting_complete':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.current = data.total_chunks;
+                        state.uploadInProgress.total = data.total_chunks;
+                    }
+                    addLog('upload', `Split complete: ${data.filename} (${data.total_chunks} chunks)`);
+                    updateUploadInProgress();
+                    break;
+
+                case 'splitting_paused':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.chunking_paused = true;
+                        state.uploadInProgress.current = data.current;
+                        state.uploadInProgress.total = data.total;
+                    }
+                    addLog('upload', `Chunking paused: ${data.filename}`);
+                    updateUploadInProgress();
+                    break;
+
+                case 'splitting_resumed':
+                    if (state.uploadInProgress && (state.uploadInProgress.upload_id === data.upload_id || state.uploadInProgress.filename === data.filename)) {
+                        state.uploadInProgress.chunking_paused = false;
+                    }
+                    addLog('upload', `Chunking resumed: ${data.filename}`);
+                    updateUploadInProgress();
+                    break;
+
                 case 'book_added':
+                    state.uploadInProgress = null;
                     addLog('book', `New book: ${data.filename} (${data.total_chunks} chunks)`);
+                    updateUploadInProgress();
                     refreshBooks();
+                    break;
+
+                case 'upload_cancelled':
+                    addLog('upload', `Upload cancelled: ${data.filename || data.upload_id}`);
+                    state.uploadInProgress = null;
+                    updateUploadInProgress();
+                    break;
+
+                case 'books_cleared':
+                    addLog('system', 'All audiobooks and history cleared');
+                    refreshBooks();
+
+                    // Also reset progress bars and status since everything is gone
+                    state.status = { total: 0, completed: 0, in_progress: 0, pending: 0, percent: 0 };
+                    state.books = [];
+                    updateProgress();
                     break;
 
                 case 'task_assigned':
@@ -655,7 +1344,125 @@
         function updateUI() {
             updateProgress();
             updateWorkers();
+            updateUploadInProgress();
             updateBooks();
+        }
+
+        function updateUploadInProgress() {
+            const container = document.getElementById('uploadInProgressContainer');
+            if (!container) return;
+
+            const u = state.uploadInProgress;
+            if (!u) {
+                container.innerHTML = '';
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            let phaseText = u.phase === 'receiving' ? 'Receiving file...' : (u.chunking_paused ? 'Chunking paused' : 'Splitting into chunks...');
+            let detail = '';
+            if (u.phase === 'receiving' && u.size_mb != null) {
+                detail = ` (${u.size_mb} MB)`;
+            } else if ((u.phase === 'splitting' || u.chunking_paused) && u.total > 0) {
+                const pct = Math.round((u.current / u.total) * 100);
+                detail = ` ${u.current}/${u.total} (${pct}%)`;
+            }
+
+            let controlBtns = '';
+            if (isAuthenticated && u.upload_id) {
+                const pauseChunkingBtn = (u.phase === 'splitting' && !u.chunking_paused)
+                    ? `<button type="button" class="auth-btn logout btn-pause-chunking" style="font-size: 12px; padding: 6px 12px;" onclick="pauseChunking('${u.upload_id}')" title="Pause creating chunks">Pause chunking</button>`
+                    : '';
+                const resumeChunkingBtn = u.chunking_paused
+                    ? `<button type="button" class="auth-btn logout btn-resume-chunking" style="font-size: 12px; padding: 6px 12px;" onclick="resumeChunking('${u.upload_id}')" title="Resume creating chunks">Resume chunking</button>`
+                    : '';
+                controlBtns = `
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+                    ${pauseChunkingBtn}
+                    ${resumeChunkingBtn}
+                    <button type="button" class="auth-btn logout btn-pause-when-ready" style="font-size: 12px; padding: 6px 12px;" onclick="pauseUploadWhenReady('${u.upload_id}')" title="When upload finishes, create book as paused">Pause when ready</button>
+                    <button type="button" class="auth-btn logout btn-discard-upload" style="font-size: 12px; padding: 6px 12px;" onclick="discardUpload('${u.upload_id}')" title="Cancel upload and discard file">Discard</button>
+                </div>
+            `;
+            }
+
+            const statusLabel = u.chunking_paused ? 'Paused' : 'Uploading';
+            container.innerHTML = `
+                <div class="book-item upload-in-progress-card">
+                    <div class="book-header">
+                        <span class="book-name" title="${u.filename}">${u.filename}</span>
+                        <span class="book-status" style="background: var(--accent-dim); color: var(--accent);">${statusLabel}</span>
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 8px;">${phaseText}${detail}</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${u.total ? Math.round((u.current / u.total) * 100) : 10}%; animation: ${u.chunking_paused ? 'none' : 'pulse 1.5s ease-in-out infinite'};"></div>
+                    </div>
+                    ${controlBtns}
+                </div>
+            `;
+        }
+
+        async function pauseChunking(uploadId) {
+            try {
+                const resp = await fetch(`/upload/${uploadId}/pause-chunking`, { method: 'POST', credentials: 'same-origin' });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                if (resp.ok) addLog('upload', 'Chunking will pause after current chunk');
+            } catch (err) {
+                addLog('error', `Failed to pause chunking: ${err.message}`);
+            }
+        }
+
+        async function resumeChunking(uploadId) {
+            try {
+                const resp = await fetch(`/upload/${uploadId}/resume-chunking`, { method: 'POST', credentials: 'same-origin' });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                if (resp.ok) addLog('upload', 'Chunking resumed');
+            } catch (err) {
+                addLog('error', `Failed to resume chunking: ${err.message}`);
+            }
+        }
+
+        async function pauseUploadWhenReady(uploadId) {
+            try {
+                const resp = await fetch(`/upload/${uploadId}/pause`, { method: 'POST', credentials: 'same-origin' });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                if (resp.ok) addLog('upload', 'Book will be created paused when upload finishes');
+            } catch (err) {
+                addLog('error', `Failed to set pause: ${err.message}`);
+            }
+        }
+
+        async function discardUpload(uploadId) {
+            if (!confirm('Cancel this upload and discard the file? Chunks already created will be removed.')) return;
+            try {
+                const resp = await fetch('/upload/cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ upload_id: uploadId })
+                });
+                if (resp.status === 401) {
+                    addLog('error', 'Authentication required');
+                    window.location.href = '/login';
+                    return;
+                }
+                addLog('upload', 'Upload cancel requested');
+            } catch (err) {
+                addLog('error', `Failed to cancel upload: ${err.message}`);
+            }
         }
 
         function updateProgress() {
@@ -682,64 +1489,113 @@
 
         function updateBooks() {
             const container = document.getElementById('booksList');
-            if (state.books.length === 0) {
-                container.innerHTML = '<span class="empty-state">No audiobooks uploaded yet</span>';
-            } else {
-                container.innerHTML = state.books.map(book => {
-                    const percent = Math.round(book.completed_chunks / book.total_chunks * 100);
-                    const isComplete = book.completed_chunks === book.total_chunks;
-                    const isPaused = book.paused === 1;
-                    const filename = book.original_filename || book.book_id;
-                    
-                    // Build icons HTML (only shown when authenticated)
-                    let iconsHtml = '';
-                    if (isAuthenticated) {
-                        iconsHtml = `
-                            <div class="book-icons">
-                                ${!isComplete ? (isPaused 
-                                    ? `<button class="book-icon resume" onclick="resumeBook('${book.book_id}')" title="Resume">▶</button>`
-                                    : `<button class="book-icon pause" onclick="pauseBook('${book.book_id}')" title="Pause">⏸</button>`
-                                ) : ''}
-                                <button class="book-icon delete" onclick="deleteBook('${book.book_id}', '${filename.replace(/'/g, "\\'")}')" title="Delete">✕</button>
-                            </div>
-                        `;
-                    }
-                    
-                    // Download button for completed books
-                    let downloadHtml = isComplete 
-                        ? `<a href="/results/${book.book_id}" class="download-btn" style="margin-top: 10px;">Download Transcript</a>` 
-                        : '';
-                    
-                    return `
-                        <div class="book-item">
-                            ${iconsHtml}
-                            <div class="book-header">
-                                <span class="book-name">${filename}</span>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    ${isPaused ? '<span class="book-status paused">Paused</span>' : ''}
-                                    <span class="book-progress">${book.completed_chunks}/${book.total_chunks} chunks (${percent}%)</span>
-                                </div>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${percent}%"></div>
-                            </div>
-                            ${downloadHtml}
+            const paginationEl = document.getElementById('booksPagination');
+            const total = state.books.length;
+            const totalPages = Math.max(1, Math.ceil(total / BOOKS_PER_PAGE));
+            if (state.booksPage > totalPages) state.booksPage = totalPages;
+            const start = (state.booksPage - 1) * BOOKS_PER_PAGE;
+            const pageBooks = state.books.slice(start, start + BOOKS_PER_PAGE);
+
+            if (total === 0) {
+                container.innerHTML = '<span class="empty-state">No audiobooks yet</span>';
+                if (paginationEl) paginationEl.style.display = 'none';
+                return;
+            }
+
+            container.innerHTML = pageBooks.map(book => {
+                const percent = Math.round(book.completed_chunks / book.total_chunks * 100);
+                const isComplete = book.completed_chunks === book.total_chunks;
+                const isPaused = book.paused === 1;
+                const filename = book.original_filename || book.book_id;
+
+                let iconsHtml = '';
+                if (isAuthenticated) {
+                    iconsHtml = `
+                        <div class="book-icons">
+                            ${!isComplete ? (isPaused
+                            ? `<button class="book-icon resume" onclick="resumeBook('${book.book_id}')" title="Resume">▶</button>`
+                            : `<button class="book-icon pause" onclick="pauseBook('${book.book_id}')" title="Pause">⏸</button>`
+                        ) : ''}
+                            <button class="book-icon delete" onclick="deleteBook('${book.book_id}', '${filename.replace(/'/g, "\\'")}')" title="Delete">✕</button>
                         </div>
                     `;
-                }).join('');
+                }
+
+                let downloadHtml = isComplete
+                    ? `
+                      <div style="margin-top: 10px; display: flex; gap: 10px;">
+                          <a href="/results/${book.book_id}" class="download-btn">Download transcript</a>
+                          <a href="/results/audio/${book.book_id}" class="download-btn download-btn-secondary">Download audio</a>
+                      </div>
+                      `
+                    : '';
+
+                return `
+                    <div class="book-item">
+                        ${iconsHtml}
+                        <div class="book-header">
+                            <span class="book-name" title="${filename}">${filename}</span>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                ${isPaused ? '<span class="book-status paused">Paused</span>' : ''}
+                                <span class="book-progress">${book.completed_chunks}/${book.total_chunks} chunks (${percent}%)</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${percent}%"></div>
+                        </div>
+                        ${downloadHtml}
+                    </div>
+                `;
+            }).join('');
+
+            if (paginationEl) {
+                paginationEl.style.display = 'flex';
+                const end = Math.min(start + BOOKS_PER_PAGE, total);
+                const showRange = totalPages > 1 ? `${start + 1}–${end} of ${total}` : `${total} book${total !== 1 ? 's' : ''}`;
+                let pageNums = '';
+                const maxDots = 5;
+                if (totalPages <= maxDots + 2) {
+                    for (let i = 1; i <= totalPages; i++) {
+                        pageNums += `<button type="button" class="page-num ${i === state.booksPage ? 'active' : ''}" onclick="goToBooksPage(${i})">${i}</button>`;
+                    }
+                } else {
+                    const p = state.booksPage;
+                    pageNums += `<button type="button" class="page-num ${p === 1 ? 'active' : ''}" onclick="goToBooksPage(1)">1</button>`;
+                    if (p > 3) pageNums += '<span style="color: var(--text-dim); padding: 0 4px;">…</span>';
+                    for (let i = Math.max(2, p - 1); i <= Math.min(totalPages - 1, p + 1); i++) {
+                        if (i !== 1) pageNums += `<button type="button" class="page-num ${i === p ? 'active' : ''}" onclick="goToBooksPage(${i})">${i}</button>`;
+                    }
+                    if (p < totalPages - 2) pageNums += '<span style="color: var(--text-dim); padding: 0 4px;">…</span>';
+                    if (totalPages > 1) pageNums += `<button type="button" class="page-num ${p === totalPages ? 'active' : ''}" onclick="goToBooksPage(${totalPages})">${totalPages}</button>`;
+                }
+                paginationEl.innerHTML = `
+                    <span class="pagination-info">${showRange}</span>
+                    <div class="pagination-btns">
+                        <button type="button" onclick="goToBooksPage(${state.booksPage - 1})" ${state.booksPage <= 1 ? 'disabled' : ''}>Previous</button>
+                        ${pageNums}
+                        <button type="button" onclick="goToBooksPage(${state.booksPage + 1})" ${state.booksPage >= totalPages ? 'disabled' : ''}>Next</button>
+                    </div>
+                `;
             }
+        }
+
+        function goToBooksPage(page) {
+            const totalPages = Math.max(1, Math.ceil(state.books.length / BOOKS_PER_PAGE));
+            if (page < 1 || page > totalPages) return;
+            state.booksPage = page;
+            updateBooks();
         }
 
         function loadPersistedLogs(logs) {
             const container = document.getElementById('activityLog');
-            
+
             // Clear empty state
             const emptyState = container.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
-            
+
             // Clear existing logs
             container.innerHTML = '';
-            
+
             // Logs come in descending order (newest first), display them
             logs.forEach(log => {
                 const entry = document.createElement('div');
@@ -830,4 +1686,5 @@
         connect();
     </script>
 </body>
+
 </html>

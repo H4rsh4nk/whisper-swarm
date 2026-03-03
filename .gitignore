@@ -16,10 +16,13 @@ venv/
 venv_worker/
 /venv_worker/
 /venv_worker/**
+venv_watcher/
+.packages/
 
 ## Environment files
 .env
 .env.*
+!.env.example
 
 ## Editor/OS
 .idea/
@@ -35,3 +38,5 @@ uploads/
 chunks/
 results/
 stt_tasks.db
+books.db
+watcher/processed_files.json

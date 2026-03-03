@@ -1,0 +1,4 @@
+httpx
+watchdog
+python-dotenv
+beautifulsoup4
