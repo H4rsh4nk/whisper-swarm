@@ -128,6 +128,25 @@ def normalize_metadata(next_data: dict) -> dict | None:
     if cover_url and not cover_url.startswith("http"):
         cover_url = urljoin("https://dreamefm.com/", cover_url)
 
+    # Narrator, length, episode count, status (for book_info.json)
+    narrated_by = book.get("reciterName") or book.get("narrator") or ""
+    if isinstance(narrated_by, dict):
+        narrated_by = narrated_by.get("name") or ""
+    length_str = book.get("duration") or book.get("length") or ""
+    if isinstance(length_str, (int, float)) and length_str > 0:
+        h = int(length_str // 3600)
+        m = int((length_str % 3600) // 60)
+        length_str = f"{h}hrs {m:02d}mins"
+    episode_count = book.get("chapterNum") or book.get("episodeCount") or 0
+    listener_count = book.get("playCount") or 0
+    status_raw = book.get("status") or book.get("upshelfStatus") or ""
+    if status_raw == 2 or status_raw == "2" or (isinstance(status_raw, str) and "UPSHELF" in status_raw.upper()):
+        status = "Completed"
+    elif status_raw:
+        status = str(status_raw)
+    else:
+        status = "Completed"
+
     # Episodes: from page or from API later (Dreame puts chapters in getOfficialBookChapterList)
     raw_episodes = (
         book.get("episodes")
@@ -177,6 +196,11 @@ def normalize_metadata(next_data: dict) -> dict | None:
         "author": author.strip() or "Unknown",
         "cover_url": cover_url,
         "book_id": book.get("id"),  # for chapter list API
+        "narrated_by": (narrated_by or "").strip(),
+        "length": (length_str or "").strip(),
+        "episode_count": int(episode_count) if episode_count else 0,
+        "listener_count": int(listener_count) if listener_count else 0,
+        "status": status,
         "episodes": episodes,
     }
 
@@ -513,6 +537,21 @@ def run_scraper(
     work_dir.mkdir(parents=True, exist_ok=True)
     episode_dir = work_dir / "episodes"
     episode_dir.mkdir(exist_ok=True)
+
+    # Save book metadata JSON (title, author, narrator, length, episodes, status, listeners)
+    book_info = {
+        "title": meta.get("title") or "Unknown",
+        "author": meta.get("author") or "Unknown",
+        "narrated_by": meta.get("narrated_by") or "",
+        "length": meta.get("length") or "",
+        "episodes": len(episodes),
+        "status": meta.get("status") or "Completed",
+        "listener_count": meta.get("listener_count") or 0,
+    }
+    (work_dir / "book_info.json").write_text(
+        json.dumps(book_info, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     episode_files = []
     chapters_for_json = []
