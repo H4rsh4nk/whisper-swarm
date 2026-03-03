@@ -48,6 +48,10 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 DREAME_EPISODE_AUDIO_API = os.environ.get("DREAME_EPISODE_AUDIO_API", "")  # optional template with {episode_id}
 DREAME_DOWNLOAD_DELAY = float(os.environ.get("DREAME_DOWNLOAD_DELAY", "1.0"))  # seconds between episode downloads
 
+# Base directory for Dreame downloads: book folders go here (e.g. downloads/dreame_47-the-unloved-mate/episodes/)
+_DEFAULT_DOWNLOAD_BASE = Path(__file__).parent.parent / "downloads"
+DREAME_DOWNLOAD_DIR = Path(os.environ.get("DREAME_DOWNLOAD_DIR", str(_DEFAULT_DOWNLOAD_BASE)))
+
 # Dreame FM chapter list API (official)
 DREAME_CHAPTER_API = "https://dreamefmapi.system.stary.ltd/bookShelf/getOfficialBookChapterList"
 
@@ -447,7 +451,7 @@ def run_scraper(
     auto_discover: bool = True,
     merge_to_single: bool = False,
 ) -> bool:
-    output_dir = output_dir or Path(__file__).parent
+    output_dir = output_dir or DREAME_DOWNLOAD_DIR
     book_id = parse_book_id_from_url(book_url)
     if not book_id:
         print("[ERROR] Could not parse book ID from URL")
