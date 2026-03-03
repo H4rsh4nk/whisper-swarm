@@ -2,3 +2,4 @@ httpx
 watchdog
 python-dotenv
 beautifulsoup4
+playwright

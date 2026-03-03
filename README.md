@@ -88,8 +88,73 @@ distributed-stt/
 ├── results/                # Completed transcripts
 ├── run_master.bat/.sh      # Start master server
 ├── run_worker.bat/.sh      # Start worker client
+├── run_dreame_scraper.bat  # (Optional) Scrape audiobook from Dreame FM
 └── README.md
 ```
+
+## Optional: Dreame FM Scraper (no torrent)
+
+You can optionally pull audiobooks directly from Dreame FM instead of via torrent/qBittorrent.  
+The scraper runs on your master machine and:
+- Opens the Dreame FM book page (e.g. `https://dreamefm.com/book/47-the-unloved-mate`)
+- Discovers the chapter list and per‑chapter audio URLs
+- Downloads each chapter as a separate MP3 into a local folder
+
+### Setup
+
+1. **Configure watcher env (already used by qBit watcher)**
+
+   In `watcher/.env`:
+   - `MASTER_URL=http://localhost:8000` (or your ngrok/Tailscale URL)
+   - `WATCH_FOLDER=C:\Audiobooks` (same as watcher, if you ever want merged uploads)
+   - `ADMIN_USERNAME` / `ADMIN_PASSWORD` must match the master server env.
+
+2. **Install scraper dependencies**
+
+   The Windows helper script will do this for you on first run:
+   ```batch
+   run_dreame_scraper.bat
+   ```
+   It will:
+   - Install `watcher/requirements.txt` into `watcher/.packages`
+   - Run `python -m playwright install chromium`
+
+### Usage
+
+- **Quick run (default, chapters only):**
+
+  ```batch
+  run_dreame_scraper.bat
+  ```
+
+  This uses a hard‑coded Dreame FM book URL (currently **The Unloved Mate**) and:
+  - Creates a folder like `watcher/dreame_47-the-unloved-mate/`
+  - Writes one file per chapter into `episodes/`:
+    - `001 - Chapter 01.mp3`
+    - `002 - Chapter 02.mp3`
+    - `...`
+  - Does **not** merge or upload to the master.
+
+- **Custom book / advanced flags:**
+
+  ```bash
+  cd watcher
+  # Chapters only for a specific book URL
+  python dreame_scraper.py "https://dreamefm.com/book/47-the-unloved-mate"
+
+  # Also create a single merged MP3 and copy it into WATCH_FOLDER
+  python dreame_scraper.py "https://dreamefm.com/book/47-the-unloved-mate" --merge
+
+  # Merge and upload directly to the master (requires valid ADMIN_* env on master + watcher)
+  python dreame_scraper.py "https://dreamefm.com/book/47-the-unloved-mate" --merge --upload
+  ```
+
+### Notes and limitations
+
+- The scraper relies on the visible **“Chapter X”** buttons on the web page; it can only download chapters that Dreame FM actually serves to the browser for your account.
+- For most workflows with this project you can:
+  - Use **chapters‑only mode** for your own app (consume the files in `watcher/dreame_*/episodes/`)
+  - Or enable `--merge` + watcher to feed a single MP3 into the STT pipeline.
 
 ## Configuration
 

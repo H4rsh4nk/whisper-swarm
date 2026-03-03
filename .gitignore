@@ -40,3 +40,6 @@ results/
 stt_tasks.db
 books.db
 watcher/processed_files.json
+watcher/dreame_next_data.json
+watcher/dreame_network_log.json
+watcher/dreame_*/
